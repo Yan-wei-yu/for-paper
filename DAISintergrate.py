@@ -22,8 +22,10 @@ import time
 import cv2
 import historgramloss
 # 參考
-# TODO local discriminator need use 4 photho 
+# TODO global&local discriminator not match paper layer
 # TODO historgram loss check
+# TODO WGAN add
+
 
 # https://colab.research.google.com/drive/182CGDnFxt08NmjCCTu5jDweUjn3jhB2y
 parser = argparse.ArgumentParser()
@@ -697,11 +699,9 @@ def create_generator(generator_inputs, discrimCon1, discrimCon2, generator_outpu
 
 # create model
 def create_model(inputs, condition1, condition2, targets):
-    # gan discriminator
     def create_discriminator(discrim_inputs,discrim_con1, discrim_con2,  discrim_targets):
         n_layers = 3
         layers = []
-        perlayers=[]
 
         # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
         # tf.concat 在通道維度（axis=3）進行拼接，將判別器輸入、條件和目標圖像組合在一起。
@@ -729,7 +729,6 @@ def create_model(inputs, condition1, condition2, targets):
                 convolved = conv(layers[-1], out_channels, stride=stride)
                 normalized = batchnorm(convolved)
                 rectified = lrelu(normalized, 0.2)
-                perlayers.append(rectified)
                 layers.append(rectified)
         # 最後一層（layer_5）將卷積的輸出映射到 1 通道（即二分類結果：真或假）
         # 並使用 Sigmoid 函數將結果限制在 [0, 1] 範圍內，表示判別結果。
@@ -739,8 +738,7 @@ def create_model(inputs, condition1, condition2, targets):
             output = tf.sigmoid(convolved)
             layers.append(output)
         # perlayers：這個列表包含了每一層的輸出結果。它包括所有中間層（rectified 激活後的層），以及最終輸出層
-        perlayers.append(layers[-1])
-        return perlayers
+        return layers[-1]
     # perceTarget：目標圖像的特徵表示，通常是從一個預訓練的網絡中提取的特徵圖。
     # perceOutput：生成圖像的特徵表示，通常是生成器輸出的圖像的特徵圖。
     def perceptual_Loss(perceTarget, perceOutput):
@@ -815,7 +813,7 @@ def create_model(inputs, condition1, condition2, targets):
             output = tf.sigmoid(convolved)
             layers.append(output)
         # 返回 layers 列表中的最後一層（輸出張量），表示局部判別器的最終判定結果。
-        return layers[-1]
+        return layers
 
     # with tf.name_scope 用來管理計算圖中的命名空間，從而使代碼的結構更清晰，便於調試和查找變量。
     #  TensorBoard 中區分或查看一組相關操作（如損失計算、可視化輸出等）的情況。
@@ -859,12 +857,12 @@ def create_model(inputs, condition1, condition2, targets):
         # predict_real => 1
         # predict_fake => 0
         # 引入感知層面的判別。
-        discrim_loss_per = tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_real,predict_fake)))
+        discrim_loss_per = tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_local_real,predict_local_fake)))
         # text{global_discrim_loss} = -\log(D(\text{real})) - \log(1 - D(\text{fake}))
         # 對真實圖像輸出值靠近 1，對假圖像輸出值靠近 0。
-        global_discrim_loss=tf.reduce_mean(-(tf.log(predict_real[-1] + EPS) + tf.log(1 - predict_fake[-1] + EPS)))
+        global_discrim_loss=tf.reduce_mean(-(tf.log(predict_real + EPS) + tf.log(1 - predict_fake + EPS)))
         # 判別局部特徵是否真實。
-        local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real + EPS) + tf.log(1 - predict_local_fake + EPS)))
+        local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real[-1] + EPS) + tf.log(1 - predict_local_fake[-1] + EPS)))
         discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
 
     #flyadd 构建中央沟提取模型
@@ -913,8 +911,6 @@ def create_model(inputs, condition1, condition2, targets):
             gen_grads_and_vars = gen_optim.compute_gradients(gen_loss, var_list=gen_tvars)
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
-
-    # TODO
     # 指標的滑動平均值計算，用於平滑損失曲線，讓訓練過程中的指標更加穩定
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
     #  gen_per_loss ,discrim_loss_per,
