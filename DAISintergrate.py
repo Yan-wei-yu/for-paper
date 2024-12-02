@@ -765,18 +765,20 @@ def create_model(inputs, condition1, condition2, targets):
     # discrim_targets: 判別器的目標，通常是真實的圖像。
     # 起始點為 (80, 80)，表示從圖像的第 80 行、第 80 列開始。
     # 裁剪的大小為 (128, 128)，表示裁剪後的區域是 128x128 的正方形。
-    def create_local_discriminator(discrim_inputs, discrim_targets):
+    def create_local_discriminator(discrim_inputs,discrim_con1, discrim_con2, discrim_targets):
         n_layers = 2
         layers = []
 
         #tensor ROI区域裁剪
         crop_inputs=tf.image.crop_to_bounding_box(discrim_inputs,80,80,128,128)
+        crop_discrim_con1=tf.image.crop_to_bounding_box(discrim_con1,80,80,128,128)
+        crop_discrim_con2 = tf.image.crop_to_bounding_box(discrim_con2, 80, 80, 128, 128)
         crop_targets = tf.image.crop_to_bounding_box(discrim_targets, 80, 80, 128, 128)
 
         # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
         # 將裁剪的輸入（crop_inputs）和目標（crop_targets）組合為一個張量。
         # 如果每個張量的通道數為 C，拼接後的通道數將為 2C。   
-        input = tf.concat([crop_inputs, crop_targets], axis=3)
+        input = tf.concat([crop_inputs,crop_discrim_con1,crop_discrim_con2, crop_targets], axis=3)
         # 輸入：拼接後的張量。
         # 輸出通道數：a.nldf（局部判別器的基礎通道數）。
         # 步幅：stride=2，表示每次移動兩個像素，用於下採樣。
@@ -843,13 +845,13 @@ def create_model(inputs, condition1, condition2, targets):
     with tf.name_scope("real_local_discriminator"):
         with tf.variable_scope("local_discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_real = create_local_discriminator(inputs, targets)
+            predict_local_real = create_local_discriminator(inputs, condition1, condition2, outputs)
 
     with tf.name_scope("fake_local_discriminator"):
         # Setting reuse=True avoids creating new variables and reuses the ones from the local  real discriminator.
         with tf.variable_scope("local_discriminator", reuse=True):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_fake = create_local_discriminator(inputs, outputs)
+            predict_local_fake = create_local_discriminator(inputs, condition1, condition2, outputs)
 
 
     with tf.name_scope("discriminator_loss"):
@@ -881,19 +883,19 @@ def create_model(inputs, condition1, condition2, targets):
         # 看起來這邊還要加值方圖損失函式在L1那邊
         # GAN Loss=−log(D(G(z)))
         # -log(predict_fake)，當 predict_fake 趨近 1 時，損失會接近 0。
-        gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake[-1] + EPS))
+        gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake[-1] + EPS))#1
         #  (outputs) 接近目標圖像 (targets)，提高生成結果的真實性。
         # L1 損失對像素值差異的敏感性較低，通常比 L2 損失更適合圖像生成。
-        gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
+        gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))#2
         # 比較生成的圖像和真實圖像在特徵空間中的差異 (不是像素層面的直接差異)。
         # 用法：提高生成圖像的高層次感知相似性，例如紋理或內容的相似度。
-        gen_per_loss=perceptual_Loss(predict_real,predict_fake)
+        gen_per_loss=perceptual_Loss(predict_real,predict_fake)#3
         # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
-        gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))
+        gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
         # 作用：對生成圖像特徵的分佈與條件特徵 (condition2) 進行比較，確保生成的圖像符合指定的條件分佈。
         X = tf.reshape(outputs, [a.batch_size, -1])  # 生成器輸出的特徵向量
         L = condition2  
-        hist_loss = historgramloss.histogram_loss(X, L)
+        hist_loss = historgramloss.histogram_loss(X, L)#5
         # 將上述多個損失以權重加權求和，平衡不同損失的影響。
         gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
     # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
@@ -1010,7 +1012,7 @@ def main():
     # # 训练的时候的参数(由于采用
     a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//DAISDUNETPREV3//"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GAN//"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
