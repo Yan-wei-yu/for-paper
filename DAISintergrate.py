@@ -2,13 +2,6 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-import os
-# 選擇 CUDA 版本
-cuda_version = "v8.0"  # 修改為 "v11.7" 或其他版本
-
-# 動態設置環境變數
-os.environ["CUDA_HOME"] = f"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\{cuda_version}"
-os.environ["Path"] = f"{os.environ['CUDA_HOME']}\\bin;{os.environ['CUDA_HOME']}\\libnvvp;" + os.environ["Path"]
 import tensorflow as tf
 import numpy as np
 import argparse
@@ -20,11 +13,11 @@ import collections
 import math
 import time
 import cv2
-import historgramloss
+# import historgramloss
 # 參考
-# TODO global&local discriminator not match paper layer
 # TODO historgram loss check
 # TODO WGAN add
+# TODO Check perceptual for layer
 
 
 # https://colab.research.google.com/drive/182CGDnFxt08NmjCCTu5jDweUjn3jhB2y
@@ -116,8 +109,10 @@ Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condit
 # count: 圖像的總數。
 # steps_per_epoch: 每個epoch的步數。
 # discrim_loss_per、gen_per_loss
+# Model = collections.namedtuple("Model",
+#                                "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 Model = collections.namedtuple("Model",
-                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,hist_loss,gen_loss_CenSul, gen_grads_and_vars, train")
+                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss, gen_grads_and_vars, train")
 # Model的命名元組，包含以下字段：
 # outputs: 生成的圖像輸出。
 # predict_real: 對真實圖像的預測結果。
@@ -700,7 +695,7 @@ def create_generator(generator_inputs, discrimCon1, discrimCon2, generator_outpu
 # create model
 def create_model(inputs, condition1, condition2, targets):
     def create_discriminator(discrim_inputs,discrim_con1, discrim_con2,  discrim_targets):
-        n_layers = 3
+        n_layers = 4
         layers = []
 
         # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
@@ -745,7 +740,7 @@ def create_model(inputs, condition1, condition2, targets):
         # 這些權重值決定了每一層特徵圖在計算感知損失時的相對重要性。權重越大，對應層的感知損失在最終損失中的影響越大。
         weight = [1.0,2.0,2.0]
         perLoss=[]
-        for i in range(len(perceTarget)-1):
+        for i in range(len(perceTarget)-2):
             # 對於第一層，直接計算目標和生成圖像的絕對差異的平均值，並乘以相應的權重 weight[i]。
             if i==0:
                 perLoss.append(tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i])
@@ -764,7 +759,7 @@ def create_model(inputs, condition1, condition2, targets):
     # 起始點為 (80, 80)，表示從圖像的第 80 行、第 80 列開始。
     # 裁剪的大小為 (128, 128)，表示裁剪後的區域是 128x128 的正方形。
     def create_local_discriminator(discrim_inputs,discrim_con1, discrim_con2, discrim_targets):
-        n_layers = 2
+        n_layers = 3
         layers = []
 
         #tensor ROI区域裁剪
@@ -795,7 +790,7 @@ def create_model(inputs, condition1, condition2, targets):
         # 如果超過 8 倍的基礎通道數，將通道數固定為 a.nldf * 8。
         for i in range(n_layers):
             with tf.variable_scope("layer_%d" % (len(layers) + 1)):
-                out_channels = a.nldf * min(2 ** (i + 1), 8)
+                out_channels = a.nldf * min(2 ** (i + 1), 4)
                 # 當 i == n_layers - 1 時，使用 stride=1，否則使用 stride=2。
                 stride = 1 if i == n_layers - 1 else 2  # last layer here has stride 1
                 convolved = conv(layers[-1], out_channels, stride=stride)
@@ -863,6 +858,7 @@ def create_model(inputs, condition1, condition2, targets):
         global_discrim_loss=tf.reduce_mean(-(tf.log(predict_real + EPS) + tf.log(1 - predict_fake + EPS)))
         # 判別局部特徵是否真實。
         local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real[-1] + EPS) + tf.log(1 - predict_local_fake[-1] + EPS)))
+        # discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
         discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
 
     #flyadd 构建中央沟提取模型
@@ -885,17 +881,21 @@ def create_model(inputs, condition1, condition2, targets):
         #  (outputs) 接近目標圖像 (targets)，提高生成結果的真實性。
         # L1 損失對像素值差異的敏感性較低，通常比 L2 損失更適合圖像生成。
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))#2
-        # 比較生成的圖像和真實圖像在特徵空間中的差異 (不是像素層面的直接差異)。
-        # 用法：提高生成圖像的高層次感知相似性，例如紋理或內容的相似度。
-        gen_per_loss=perceptual_Loss(predict_real,predict_fake)#3
-        # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
-        gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
+        # # 比較生成的圖像和真實圖像在特徵空間中的差異 (不是像素層面的直接差異)。
+        # # 用法：提高生成圖像的高層次感知相似性，例如紋理或內容的相似度。
+        # TODO why 0 
+        # tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_local_real,predict_local_fake)))
+        gen_per_loss=perceptual_Loss(predict_local_real,predict_local_fake)#3
+        # # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
+        # gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
         # 作用：對生成圖像特徵的分佈與條件特徵 (condition2) 進行比較，確保生成的圖像符合指定的條件分佈。
-        X = tf.reshape(outputs, [a.batch_size, -1])  # 生成器輸出的特徵向量
-        L = condition2  
-        hist_loss = historgramloss.histogram_loss(X, L)#5
+        # X = tf.reshape(outputs, [a.batch_size, -1])  # 生成器輸出的特徵向量
+        # L = condition2  
+        # hist_loss = historgramloss.histogram_loss(X, L)#5
         # 將上述多個損失以權重加權求和，平衡不同損失的影響。
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
+        # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
+        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight
+
     # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
     with tf.name_scope("discriminator_train"):
         discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
@@ -911,10 +911,12 @@ def create_model(inputs, condition1, condition2, targets):
             gen_grads_and_vars = gen_optim.compute_gradients(gen_loss, var_list=gen_tvars)
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
+
     # 指標的滑動平均值計算，用於平滑損失曲線，讓訓練過程中的指標更加穩定
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
     #  gen_per_loss ,discrim_loss_per,
-    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,hist_loss])
+    # update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,hist_loss])
+    update_losses = ema.apply([global_discrim_loss,local_discrim_loss,discrim_loss_per, gen_loss_GAN, gen_loss_L1, gen_per_loss])
     # 管理訓練步驟，global_step 是 TensorFlow 內建變量，用於記錄當前訓練進行的步數。
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step + 1)
@@ -930,9 +932,9 @@ def create_model(inputs, condition1, condition2, targets):
         discrim_grads_and_vars=discrim_grads_and_vars,
         gen_loss_GAN=ema.average(gen_loss_GAN),
         gen_loss_L1=ema.average(gen_loss_L1),
-        gen_loss_CenSul=ema.average(gen_loss_CenSul),
+        # gen_loss_CenSul=ema.average(gen_loss_CenSul),
         gen_per_loss=ema.average(gen_per_loss),
-        hist_loss=ema.average(hist_loss),
+        # hist_loss=ema.average(hist_loss),
 
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
@@ -1003,12 +1005,12 @@ def main():
     #         raise Exception("Tensorflow version 1 required")
 
     # 训练的时候的参数(由于采用
-    a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
+    # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
     # # 训练的时候的参数(由于采用
-    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
+    a.input_dir =  "D:/Weekly_Report/Thesis_Weekly_Report/paper/paper_Implementation/final/"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GAN//"
+    a.output_dir = "D:/Weekly_Report/Thesis_Weekly_Report/paper/paper_Implementation/test/"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
@@ -1250,9 +1252,9 @@ def main():
     tf.summary.scalar("discriminator_loss_per", model.discrim_loss_per)
     tf.summary.scalar("generator_loss_GAN", model.gen_loss_GAN)
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
-    tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
+    # tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
     tf.summary.scalar("generator_loss_per", model.gen_per_loss)
-    tf.summary.scalar("hist_loss", model.hist_loss)
+    # tf.summary.scalar("hist_loss", model.hist_loss)
 
     # 對所有可訓練的變數（如權重、偏置）繪製直方圖，記錄其值的分布
     for var in tf.trainable_variables():
@@ -1361,9 +1363,9 @@ def main():
                     fetches["discrim_loss_per"] = model.discrim_loss_per
                     fetches["gen_loss_GAN"] = model.gen_loss_GAN
                     fetches["gen_loss_L1"] = model.gen_loss_L1
-                    fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
+                    # fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
                     fetches["gen_per_loss"] = model.gen_per_loss
-                    fetches["hist_loss"] = model.hist_loss
+                    # fetches["hist_loss"] = model.hist_loss
 
                 # 用 sess.run 執行定義的操作，並返回結果 results。
                 if should(a.summary_freq):
@@ -1404,9 +1406,9 @@ def main():
                     print("discrim_loss_per", results["discrim_loss_per"])
                     print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
-                    print("gen_loss_CenSul", results["gen_loss_CenSul"])
+                    # print("gen_loss_CenSul", results["gen_loss_CenSul"])
                     print("gen_per_loss", results["gen_per_loss"])
-                    print("hist_loss", results["hist_loss"])
+                    # print("hist_loss", results["hist_loss"])
                     
                     
 
