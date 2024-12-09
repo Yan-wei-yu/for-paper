@@ -19,7 +19,6 @@ import cv2
 # TODO WGAN add
 # TODO Check perceptual for layer
 
-
 # https://colab.research.google.com/drive/182CGDnFxt08NmjCCTu5jDweUjn3jhB2y
 parser = argparse.ArgumentParser()
 #--input_dir:包含圖像的文件夾路徑。
@@ -112,7 +111,7 @@ Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condit
 # Model = collections.namedtuple("Model",
 #                                "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 Model = collections.namedtuple("Model",
-                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss, gen_grads_and_vars, train")
+                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 # Model的命名元組，包含以下字段：
 # outputs: 生成的圖像輸出。
 # predict_real: 對真實圖像的預測結果。
@@ -733,23 +732,24 @@ def create_model(inputs, condition1, condition2, targets):
             output = tf.sigmoid(convolved)
             layers.append(output)
         # perlayers：這個列表包含了每一層的輸出結果。它包括所有中間層（rectified 激活後的層），以及最終輸出層
-        return layers[-1]
+        return layers
     # perceTarget：目標圖像的特徵表示，通常是從一個預訓練的網絡中提取的特徵圖。
     # perceOutput：生成圖像的特徵表示，通常是生成器輸出的圖像的特徵圖。
     def perceptual_Loss(perceTarget, perceOutput):
-        # 這些權重值決定了每一層特徵圖在計算感知損失時的相對重要性。權重越大，對應層的感知損失在最終損失中的影響越大。
-        weight = [1.0,2.0,2.0]
-        perLoss=[]
+        # 設定每層權重
+        weight = [1.0, 2.0, 2.0]
+        total_loss = 0.0
+
         for i in range(len(perceTarget)-2):
-            # 對於第一層，直接計算目標和生成圖像的絕對差異的平均值，並乘以相應的權重 weight[i]。
-            if i==0:
-                perLoss.append(tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i])
-            else:
-                # 從第二層開始，將當前層的感知損失累加到之前層的損失中，這樣會對多層損失進行積累。
-                temploss = perLoss[-1] +tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i]
-                perLoss.append(temploss)
-        # 最後返回感知損失列表中的最後一個元素，也就是最終的感知損失。
-        return perLoss[-1]
+            # 取得當前層的形狀資訊
+            _, height, width, channels = perceTarget[i].shape
+            normalization = tf.cast(height * width * channels, tf.float32)
+            # 計算感知損失，並加入權重與標準化
+            loss = tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i]
+            normalized_loss = loss / normalization
+            total_loss += normalized_loss
+
+        return total_loss
     
     
     # gan local discriminator
@@ -855,11 +855,14 @@ def create_model(inputs, condition1, condition2, targets):
         discrim_loss_per = tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_local_real,predict_local_fake)))
         # text{global_discrim_loss} = -\log(D(\text{real})) - \log(1 - D(\text{fake}))
         # 對真實圖像輸出值靠近 1，對假圖像輸出值靠近 0。
-        global_discrim_loss=tf.reduce_mean(-(tf.log(predict_real + EPS) + tf.log(1 - predict_fake + EPS)))
+        # 判別器損失
+        global_discrim_loss = tf.reduce_mean(predict_real[-1] + EPS) - tf.reduce_mean(predict_fake[-1] + EPS)
         # 判別局部特徵是否真實。
-        local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real[-1] + EPS) + tf.log(1 - predict_local_fake[-1] + EPS)))
-        # discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
+        # local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real[-1] + EPS) + tf.log(1 - predict_local_fake[-1] + EPS)))
+        local_discrim_loss=tf.reduce_mean((predict_local_real[-1] + EPS) -tf.reduce_mean( predict_local_fake[-1] + EPS))
+
         discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
+        # discrim_loss =global_discrim_loss+local_discrim_loss
 
     #flyadd 构建中央沟提取模型
     with tf.name_scope("tarCentralSul_loss"):
@@ -877,7 +880,7 @@ def create_model(inputs, condition1, condition2, targets):
         # 看起來這邊還要加值方圖損失函式在L1那邊
         # GAN Loss=−log(D(G(z)))
         # -log(predict_fake)，當 predict_fake 趨近 1 時，損失會接近 0。
-        gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake[-1] + EPS))#1
+        gen_loss_GAN = tf.reduce_mean((predict_fake[-1]))#1
         #  (outputs) 接近目標圖像 (targets)，提高生成結果的真實性。
         # L1 損失對像素值差異的敏感性較低，通常比 L2 損失更適合圖像生成。
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))#2
@@ -887,14 +890,12 @@ def create_model(inputs, condition1, condition2, targets):
         # tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_local_real,predict_local_fake)))
         gen_per_loss=perceptual_Loss(predict_local_real,predict_local_fake)#3
         # # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
-        # gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
+        gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
         # 作用：對生成圖像特徵的分佈與條件特徵 (condition2) 進行比較，確保生成的圖像符合指定的條件分佈。
-        # X = tf.reshape(outputs, [a.batch_size, -1])  # 生成器輸出的特徵向量
-        # L = condition2  
-        # hist_loss = historgramloss.histogram_loss(X, L)#5
+ 
         # 將上述多個損失以權重加權求和，平衡不同損失的影響。
         # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight
+        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight+gen_loss_CenSul*a.cenSul_weight
 
     # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
     with tf.name_scope("discriminator_train"):
@@ -916,15 +917,17 @@ def create_model(inputs, condition1, condition2, targets):
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
     #  gen_per_loss ,discrim_loss_per,
     # update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,hist_loss])
-    update_losses = ema.apply([global_discrim_loss,local_discrim_loss,discrim_loss_per, gen_loss_GAN, gen_loss_L1, gen_per_loss])
+    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_per_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul])
     # 管理訓練步驟，global_step 是 TensorFlow 內建變量，用於記錄當前訓練進行的步數。
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step + 1)
     # train=tf.group(update_losses, incr_global_step, gen_train) 
     # 將指標更新、步驟遞增和生成器訓練綁定在一起，形成完整的訓練步驟。
     return Model(
-        predict_real=cenSulTarget,
-        predict_fake=cenSulOutput,
+        # predict_real=cenSulTarget,
+        # predict_fake=cenSulOutput,
+        predict_real=predict_real[-1],
+        predict_fake=predict_fake[-1],
         global_discrim_loss=ema.average(global_discrim_loss),
         local_discrim_loss=ema.average(local_discrim_loss),
         discrim_loss_per=ema.average(discrim_loss_per),
@@ -932,7 +935,7 @@ def create_model(inputs, condition1, condition2, targets):
         discrim_grads_and_vars=discrim_grads_and_vars,
         gen_loss_GAN=ema.average(gen_loss_GAN),
         gen_loss_L1=ema.average(gen_loss_L1),
-        # gen_loss_CenSul=ema.average(gen_loss_CenSul),
+        gen_loss_CenSul=ema.average(gen_loss_CenSul),
         gen_per_loss=ema.average(gen_per_loss),
         # hist_loss=ema.average(hist_loss),
 
@@ -1008,9 +1011,9 @@ def main():
     # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
     # # 训练的时候的参数(由于采用
-    a.input_dir =  "D:/Weekly_Report/Thesis_Weekly_Report/paper/paper_Implementation/final/"
+    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     a.mode = "train"
-    a.output_dir = "D:/Weekly_Report/Thesis_Weekly_Report/paper/paper_Implementation/test/"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTEST//"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
@@ -1252,7 +1255,7 @@ def main():
     tf.summary.scalar("discriminator_loss_per", model.discrim_loss_per)
     tf.summary.scalar("generator_loss_GAN", model.gen_loss_GAN)
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
-    # tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
+    tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
     tf.summary.scalar("generator_loss_per", model.gen_per_loss)
     # tf.summary.scalar("hist_loss", model.hist_loss)
 
@@ -1363,7 +1366,7 @@ def main():
                     fetches["discrim_loss_per"] = model.discrim_loss_per
                     fetches["gen_loss_GAN"] = model.gen_loss_GAN
                     fetches["gen_loss_L1"] = model.gen_loss_L1
-                    # fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
+                    fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
                     fetches["gen_per_loss"] = model.gen_per_loss
                     # fetches["hist_loss"] = model.hist_loss
 
@@ -1406,7 +1409,7 @@ def main():
                     print("discrim_loss_per", results["discrim_loss_per"])
                     print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
-                    # print("gen_loss_CenSul", results["gen_loss_CenSul"])
+                    print("gen_loss_CenSul", results["gen_loss_CenSul"])
                     print("gen_per_loss", results["gen_per_loss"])
                     # print("hist_loss", results["hist_loss"])
                     
