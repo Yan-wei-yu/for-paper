@@ -737,19 +737,24 @@ def create_model(inputs, condition1, condition2, targets):
     # perceOutput：生成圖像的特徵表示，通常是生成器輸出的圖像的特徵圖。
     def perceptual_Loss(perceTarget, perceOutput):
         # 設定每層權重
-        weight = [1.0, 2.0, 2.0]
-        total_loss = 0.0
+        weights = [1.0, 2.0, 2.0]
+        total_feature_count = 0.0
+        total_weighted_loss = 0.0
 
-        for i in range(len(perceTarget)-2):
+        for i in range(len(perceTarget) - 2):  # 假設感知損失只考慮到倒數第三層
             # 取得當前層的形狀資訊
             _, height, width, channels = perceTarget[i].shape
-            normalization = tf.cast(height * width * channels, tf.float32)
-            # 計算感知損失，並加入權重與標準化
-            loss = tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i]
-            normalized_loss = loss / normalization
-            total_loss += normalized_loss
+            feature_count = tf.cast(height * width * channels, tf.float32)  # C_i * H_i * W_i
+            total_feature_count += feature_count  # 累加所有層的特徵數量
 
-        return total_loss
+            # 計算該層的感知損失並累加
+            diff = tf.abs(perceTarget[i] - perceOutput[i])  # \| h_i(z) - h_i(G) \|
+            layer_loss = tf.reduce_mean(diff)  # 該層損失
+            total_weighted_loss += weights[i] * layer_loss  # 加權累加
+
+        # 最終損失：累加的感知損失乘以標準化因子
+        final_loss = total_weighted_loss / total_feature_count
+        return final_loss
     
     
     # gan local discriminator
