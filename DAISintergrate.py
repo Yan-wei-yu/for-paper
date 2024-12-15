@@ -111,7 +111,7 @@ Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condit
 # Model = collections.namedtuple("Model",
 #                                "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 Model = collections.namedtuple("Model",
-                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
+                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 # Model的命名元組，包含以下字段：
 # outputs: 生成的圖像輸出。
 # predict_real: 對真實圖像的預測結果。
@@ -546,12 +546,14 @@ def load_examples():
         count=len(input_paths),
         steps_per_epoch=steps_per_epoch,
     )
-def create_generator_groove(generator_inputs, generator_outputs_channels):
+def create_generator_groove(generator_inputs, generator_outputs_channels, condition=None):
     # layers：存儲生成器模型的所有層，從編碼器到解碼器。
     layers = []
     # 編碼器通過逐層下採樣將輸入的特徵圖尺寸減小，通道數逐漸增加。
     # 第一層單獨實現，後續層根據 layer_specs 自動生成。
     # encoder_1: [batch, 256, 256, in_channels] => [batch, 128, 128, ngf]
+    if condition is not None:
+        generator_inputs = tf.concat([generator_inputs, condition], axis=3)
     with tf.variable_scope("encoder_1"):
         output = conv(generator_inputs, a.ngf, stride=2)
         layers.append(output)
@@ -872,10 +874,10 @@ def create_model(inputs, condition1, condition2, targets):
     #flyadd 构建中央沟提取模型
     with tf.name_scope("tarCentralSul_loss"):
         with tf.variable_scope("genTeethGroove"):
-            cenSulTarget = create_generator_groove(targets,1)
+            cenSulTarget = create_generator_groove(targets,1, condition=condition2)
     with tf.name_scope("outCentralSul_loss"):
         with tf.variable_scope("genTeethGroove", reuse=True):
-            cenSulOutput = create_generator_groove(outputs,1)
+            cenSulOutput = create_generator_groove(outputs,1, condition=condition2)
     #flyadd
 
 
@@ -885,7 +887,7 @@ def create_model(inputs, condition1, condition2, targets):
         # 看起來這邊還要加值方圖損失函式在L1那邊
         # GAN Loss=−log(D(G(z)))
         # -log(predict_fake)，當 predict_fake 趨近 1 時，損失會接近 0。
-        gen_loss_GAN = tf.reduce_mean((predict_fake[-1]))#1
+        gen_loss_GAN = -tf.reduce_mean((predict_fake[-1]))#1
         #  (outputs) 接近目標圖像 (targets)，提高生成結果的真實性。
         # L1 損失對像素值差異的敏感性較低，通常比 L2 損失更適合圖像生成。
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))#2
@@ -897,10 +899,17 @@ def create_model(inputs, condition1, condition2, targets):
         # # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
         gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
         # 作用：對生成圖像特徵的分佈與條件特徵 (condition2) 進行比較，確保生成的圖像符合指定的條件分佈。
- 
+        hist_fake = tf.histogram_fixed_width(predict_fake[-1], [0, 255], 256)
+        hist_real = tf.histogram_fixed_width(predict_real[-1], [0, 255], 256)
+        histogram_loss = tf.reduce_mean(
+        tf.divide(
+            tf.square(tf.cast(hist_fake, tf.float32) - tf.cast(hist_real, tf.float32)),
+            tf.maximum(1.0, tf.cast(hist_real, tf.float32))  # 確保類型一致
+        )
+    )
         # 將上述多個損失以權重加權求和，平衡不同損失的影響。
         # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight+gen_loss_CenSul*a.cenSul_weight
+        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight+gen_loss_CenSul*a.cenSul_weight+histogram_loss*a.hist_weight
 
     # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
     with tf.name_scope("discriminator_train"):
@@ -922,7 +931,7 @@ def create_model(inputs, condition1, condition2, targets):
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
     #  gen_per_loss ,discrim_loss_per,
     # update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,hist_loss])
-    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_per_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul])
+    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_per_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul,histogram_loss])
     # 管理訓練步驟，global_step 是 TensorFlow 內建變量，用於記錄當前訓練進行的步數。
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step + 1)
@@ -942,7 +951,7 @@ def create_model(inputs, condition1, condition2, targets):
         gen_loss_L1=ema.average(gen_loss_L1),
         gen_loss_CenSul=ema.average(gen_loss_CenSul),
         gen_per_loss=ema.average(gen_per_loss),
-        # hist_loss=ema.average(hist_loss),
+        histogram_loss=ema.average(histogram_loss),
 
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
@@ -1018,7 +1027,7 @@ def main():
     # # 训练的时候的参数(由于采用
     a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTEST//"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESTV1//"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
@@ -1262,7 +1271,7 @@ def main():
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
     tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
     tf.summary.scalar("generator_loss_per", model.gen_per_loss)
-    # tf.summary.scalar("hist_loss", model.hist_loss)
+    tf.summary.scalar("hist_loss", model.histogram_loss)
 
     # 對所有可訓練的變數（如權重、偏置）繪製直方圖，記錄其值的分布
     for var in tf.trainable_variables():
@@ -1373,7 +1382,7 @@ def main():
                     fetches["gen_loss_L1"] = model.gen_loss_L1
                     fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
                     fetches["gen_per_loss"] = model.gen_per_loss
-                    # fetches["hist_loss"] = model.hist_loss
+                    fetches["histogram_loss"] = model.histogram_loss
 
                 # 用 sess.run 執行定義的操作，並返回結果 results。
                 if should(a.summary_freq):
@@ -1416,7 +1425,7 @@ def main():
                     print("gen_loss_L1", results["gen_loss_L1"])
                     print("gen_loss_CenSul", results["gen_loss_CenSul"])
                     print("gen_per_loss", results["gen_per_loss"])
-                    # print("hist_loss", results["hist_loss"])
+                    print("histogram_loss", results["histogram_loss"])
                     
                     
 
