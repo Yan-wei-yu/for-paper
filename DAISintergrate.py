@@ -46,7 +46,7 @@ parser.add_argument("--progress_freq", type=int, default=50, help="display progr
 #--trace_freq:類型：int默認值：0說明：包括每個操作的執行時間、內存使用等。跟蹤會顯著降低執行速度，所以默認值為0（即不跟蹤）。
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
 #--display_freq:類型：int默認值：2000說明：每display_freq步寫當前訓練圖像。用途：設置圖像顯示的頻率。
-parser.add_argument("--display_freq", type=int, default=100,
+parser.add_argument("--display_freq", type=int, default=1000,
                     help="write current training images every display_freq steps")
 # --save_freq:類型：int默認值：2000說明：每save_freq步保存模型（設為0則禁用）。用途：設置模型保存的頻率。
 parser.add_argument("--save_freq", type=int, default=1000, help="save model every save_freq steps, 0 to disable")
@@ -492,25 +492,42 @@ def load_examples():
     # 確保輸入與輸出的隨機操作（如裁剪、翻轉等）保持一致。
     seed = random.randint(0, 2 ** 31 - 1)
 
+    # def transform(image):
+    #     r = image
+    #     # 隨機水平翻轉：根據設定隨機翻轉圖像。
+    #     if a.flip:
+    #         r = tf.image.random_flip_left_right(r, seed=seed)
+
+    #     # area produces a nice downscaling, but does nearest neighbor for upscaling
+    #     # assume we're going to be doing downscaling here
+    #     # 調整圖像大小：使用區域插值法將圖像調整到指定大小。
+    #     r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
+    #     # 使用 tf.random.uniform 在範圍 [0, a.scale_size - CROP_SIZE + 1) 生成一個隨機偏移量。
+    #     offset = tf.cast(tf.floor(tf.random_uniform([2], 0, a.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
+    #     # 如果 a.scale_size > CROP_SIZE，執行裁剪，從圖像中隨機取出一個大小為 𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸×𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸 的區域。
+    #     if a.scale_size > CROP_SIZE:
+    #         r = tf.image.crop_to_bounding_box(r, offset[0], offset[1], CROP_SIZE, CROP_SIZE)
+    #     # 則拋出異常，因為圖像不應小於裁剪大小
+    #     elif a.scale_size < CROP_SIZE:
+    #         raise Exception("scale size cannot be less than crop size")
+    #     # 返回經過翻轉、調整大小和裁剪的圖像。
+    #     return r
+
     def transform(image):
         r = image
-        # 隨機水平翻轉：根據設定隨機翻轉圖像。
+        # 隨機水平翻轉（可選）
         if a.flip:
             r = tf.image.random_flip_left_right(r, seed=seed)
 
-        # area produces a nice downscaling, but does nearest neighbor for upscaling
-        # assume we're going to be doing downscaling here
-        # 調整圖像大小：使用區域插值法將圖像調整到指定大小。
+        # 調整圖像大小至 scale_size
         r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
-        # 使用 tf.random.uniform 在範圍 [0, a.scale_size - CROP_SIZE + 1) 生成一個隨機偏移量。
-        offset = tf.cast(tf.floor(tf.random_uniform([2], 0, a.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
-        # 如果 a.scale_size > CROP_SIZE，執行裁剪，從圖像中隨機取出一個大小為 𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸×𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸 的區域。
-        if a.scale_size > CROP_SIZE:
-            r = tf.image.crop_to_bounding_box(r, offset[0], offset[1], CROP_SIZE, CROP_SIZE)
-        # 則拋出異常，因為圖像不應小於裁剪大小
-        elif a.scale_size < CROP_SIZE:
-            raise Exception("scale size cannot be less than crop size")
-        # 返回經過翻轉、調整大小和裁剪的圖像。
+
+        # 中心裁剪至 CROP_SIZE x CROP_SIZE
+        r = tf.image.central_crop(r, float(CROP_SIZE) / float(a.scale_size))
+
+        # 調整回正確的 CROP_SIZE 大小（避免浮點誤差）
+        r = tf.image.resize_images(r, [CROP_SIZE, CROP_SIZE], method=tf.image.ResizeMethod.BILINEAR)
+
         return r
 
     # 對輸入 (inputs)、條件圖像 (condit1 和 condit2)、目標圖像 (targets) 分別應用 transform 函數進行預處理
@@ -899,8 +916,9 @@ def create_model(inputs, condition1, condition2, targets):
         # # 作用：專注於生成器對目標的特定區域 (如中央溝) 的生成質量，確保這部分的準確性。
         gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))#4
         # 作用：對生成圖像特徵的分佈與條件特徵 (condition2) 進行比較，確保生成的圖像符合指定的條件分佈。
-        hist_fake = tf.histogram_fixed_width(predict_fake[-1], [0, 255], 256)
-        hist_real = tf.histogram_fixed_width(predict_real[-1], [0, 255], 256)
+        hist_fake = tf.histogram_fixed_width(predict_fake[-1],  [0.0, 255.0], 256)
+        hist_real = tf.histogram_fixed_width(predict_real[-1],  [0.0, 255.0], 256)
+
         histogram_loss = tf.reduce_mean(
         tf.divide(
             tf.square(tf.cast(hist_fake, tf.float32) - tf.cast(hist_real, tf.float32)),
@@ -1027,9 +1045,14 @@ def main():
     # # 训练的时候的参数(由于采用
     a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESTV1//"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThis250//"
     a.max_epochs=400
     a.which_direction = "BtoA"
+
+    # a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThisV1//"
+    # a.mode = "export"
+    # a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThisV1export//"
+    # a.which_direction = "BtoA"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
@@ -1096,23 +1119,24 @@ def main():
         # 移除透明通道：如果圖像有 4 個通道（RGB + Alpha），則保留前三個通道（RGB）。
         # 灰度轉 RGB：如果圖像只有 1 個通道（灰度），將其轉換為 RGB（每個通道值相同）。
         # remove alpha channel if present
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :3], lambda: input_image)
+        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :1], lambda: input_image)
         # convert grayscale to RGB
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
-                              lambda: input_image)
+        # input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
+        #                       lambda: input_image)
         # 歸一化：將圖像數據轉換為 float32，並將像素值歸一化到 [0, 1]。
         # 設置形狀：確保輸入圖像為 [CROP_SIZE, CROP_SIZE, 3]，其中 3 表示 RGB。
         # 增加 batch 維度：將圖像從 [height, width, channels] 擴展為 [1, height, width, channels]，以滿足生成器的輸入要求
         input_image = tf.image.convert_image_dtype(input_image, dtype=tf.float32)
         # fly設置圖片類型
-        input_image.set_shape([CROP_SIZE, CROP_SIZE, 3])
+        input_image.set_shape([CROP_SIZE, CROP_SIZE, 1])
         # fly增加圖片維度 axis=0 代表增加在前面加一維 -1在後面
         batch_input = tf.expand_dims(input_image, axis=0)
         # preprocess：對圖像進行預處理，使其符合生成器的輸入要求。
         # create_generator：生成器模型，輸出圖像特徵。
         # deprocess：將生成器的輸出轉換為標準圖像格式。
         with tf.variable_scope("generator"):
-            batch_output = deprocess(create_generator(preprocess(batch_input), 3))
+            batch_output = deprocess(create_generator(preprocess(batch_input),preprocess(batch_input),
+                                                      preprocess(batch_input),1))
         # 數據類型轉換：生成器的輸出圖像被轉換為 uint8（0-255 的整數值）。
         # 圖像編碼：根據用戶選擇將圖像編碼為 PNG 或 JPEG。
         # Base64 編碼：將編碼好的圖像轉換為 Base64 字符串，方便輸出。
