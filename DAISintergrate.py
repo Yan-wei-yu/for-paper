@@ -46,7 +46,7 @@ parser.add_argument("--progress_freq", type=int, default=50, help="display progr
 #--trace_freq:類型：int默認值：0說明：包括每個操作的執行時間、內存使用等。跟蹤會顯著降低執行速度，所以默認值為0（即不跟蹤）。
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
 #--display_freq:類型：int默認值：2000說明：每display_freq步寫當前訓練圖像。用途：設置圖像顯示的頻率。
-parser.add_argument("--display_freq", type=int, default=1000,
+parser.add_argument("--display_freq", type=int, default=500,
                     help="write current training images every display_freq steps")
 # --save_freq:類型：int默認值：2000說明：每save_freq步保存模型（設為0則禁用）。用途：設置模型保存的頻率。
 parser.add_argument("--save_freq", type=int, default=1000, help="save model every save_freq steps, 0 to disable")
@@ -65,7 +65,7 @@ parser.add_argument("--ngf", type=int, default=64, help="number of generator fil
 parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
 # --nldf:類型：int默認值：128說明：第一個卷積層中局部判別器濾波器的數量。用途：設置局部判別器第一層的濾波器數量。
 parser.add_argument("--nldf", type=int, default=128, help="number of local discriminator filters in first conv layer")
-parser.add_argument("--scale_size", type=int, default=800, help="scale images to this size before cropping to 256x256")
+parser.add_argument("--scale_size", type=int, default=256, help="scale images to this size before cropping to 256x256")
 #--scale_size:類型：int默認值：800說明：在裁剪到256x256之前將圖像縮放到此大小。用途：設置圖像縮放的大小。
 parser.add_argument("--flip", dest="flip", action="store_true", help="flip images horizontally")
 parser.add_argument("--no_flip", dest="flip", action="store_false", help="don't flip images horizontally")
@@ -492,43 +492,50 @@ def load_examples():
     # 確保輸入與輸出的隨機操作（如裁剪、翻轉等）保持一致。
     seed = random.randint(0, 2 ** 31 - 1)
 
-    # def transform(image):
-    #     r = image
-    #     # 隨機水平翻轉：根據設定隨機翻轉圖像。
-    #     if a.flip:
-    #         r = tf.image.random_flip_left_right(r, seed=seed)
-
-    #     # area produces a nice downscaling, but does nearest neighbor for upscaling
-    #     # assume we're going to be doing downscaling here
-    #     # 調整圖像大小：使用區域插值法將圖像調整到指定大小。
-    #     r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
-    #     # 使用 tf.random.uniform 在範圍 [0, a.scale_size - CROP_SIZE + 1) 生成一個隨機偏移量。
-    #     offset = tf.cast(tf.floor(tf.random_uniform([2], 0, a.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
-    #     # 如果 a.scale_size > CROP_SIZE，執行裁剪，從圖像中隨機取出一個大小為 𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸×𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸 的區域。
-    #     if a.scale_size > CROP_SIZE:
-    #         r = tf.image.crop_to_bounding_box(r, offset[0], offset[1], CROP_SIZE, CROP_SIZE)
-    #     # 則拋出異常，因為圖像不應小於裁剪大小
-    #     elif a.scale_size < CROP_SIZE:
-    #         raise Exception("scale size cannot be less than crop size")
-    #     # 返回經過翻轉、調整大小和裁剪的圖像。
-    #     return r
-
     def transform(image):
         r = image
-        # 隨機水平翻轉（可選）
+        # 隨機水平翻轉：根據設定隨機翻轉圖像。
         if a.flip:
             r = tf.image.random_flip_left_right(r, seed=seed)
 
-        # 調整圖像大小至 scale_size
+        # area produces a nice downscaling, but does nearest neighbor for upscaling
+        # assume we're going to be doing downscaling here
+        # 調整圖像大小：使用區域插值法將圖像調整到指定大小。
         r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
-
-        # 中心裁剪至 CROP_SIZE x CROP_SIZE
-        r = tf.image.central_crop(r, float(CROP_SIZE) / float(a.scale_size))
-
-        # 調整回正確的 CROP_SIZE 大小（避免浮點誤差）
-        r = tf.image.resize_images(r, [CROP_SIZE, CROP_SIZE], method=tf.image.ResizeMethod.BILINEAR)
-
+        # 使用 tf.random.uniform 在範圍 [0, a.scale_size - CROP_SIZE + 1) 生成一個隨機偏移量。
+        offset = tf.cast(tf.floor(tf.random_uniform([2], 0, a.scale_size - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
+        # 如果 a.scale_size > CROP_SIZE，執行裁剪，從圖像中隨機取出一個大小為 𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸×𝐶𝑅𝑂𝑃_𝑆𝐼𝑍𝐸 的區域。
+        if a.scale_size > CROP_SIZE:
+            r = tf.image.crop_to_bounding_box(r, offset[0], offset[1], CROP_SIZE, CROP_SIZE)
+        # 則拋出異常，因為圖像不應小於裁剪大小
+        elif a.scale_size < CROP_SIZE:
+            raise Exception("scale size cannot be less than crop size")
+        # 返回經過翻轉、調整大小和裁剪的圖像。
         return r
+
+    # def transform(image):
+    #     r = image
+    #     # 隨機水平翻轉（可選）
+    #     if a.flip:
+    #         r = tf.image.random_flip_left_right(r, seed=seed)
+
+    #     # 調整圖像大小至 scale_size
+    #     r = tf.image.resize_images(r, [a.scale_size, a.scale_size], method=tf.image.ResizeMethod.AREA)
+
+    #     # 計算整數的 offset_height 和 offset_width
+    #     offset_height = int(95 * (a.scale_size / CROP_SIZE))
+    #     offset_width = int(80 * (a.scale_size / CROP_SIZE))
+
+    #     # 裁剪放大後的區域
+    #     r = tf.image.crop_to_bounding_box(
+    #         r,
+    #         offset_height=offset_height,
+    #         offset_width=offset_width,
+    #         target_height=CROP_SIZE,
+    #         target_width=CROP_SIZE
+    #     )
+
+    #     return r
 
     # 對輸入 (inputs)、條件圖像 (condit1 和 condit2)、目標圖像 (targets) 分別應用 transform 函數進行預處理
     with tf.name_scope("input_images"):
@@ -757,23 +764,19 @@ def create_model(inputs, condition1, condition2, targets):
     def perceptual_Loss(perceTarget, perceOutput):
         # 設定每層權重
         weights = [1.0, 2.0, 2.0]
-        total_feature_count = 0.0
         total_weighted_loss = 0.0
 
         for i in range(len(perceTarget) - 2):  # 假設感知損失只考慮到倒數第三層
             # 取得當前層的形狀資訊
             _, height, width, channels = perceTarget[i].shape
             feature_count = tf.cast(height * width * channels, tf.float32)  # C_i * H_i * W_i
-            total_feature_count += feature_count  # 累加所有層的特徵數量
 
             # 計算該層的感知損失並累加
             diff = tf.abs(perceTarget[i] - perceOutput[i])  # \| h_i(z) - h_i(G) \|
             layer_loss = tf.reduce_mean(diff)  # 該層損失
-            total_weighted_loss += weights[i] * layer_loss  # 加權累加
-
-        # 最終損失：累加的感知損失乘以標準化因子
-        final_loss = total_weighted_loss / total_feature_count
-        return final_loss
+            total_weighted_loss += weights[i]* feature_count * layer_loss  # 加權累加
+ 
+        return total_weighted_loss
     
     
     # gan local discriminator
@@ -886,15 +889,16 @@ def create_model(inputs, condition1, condition2, targets):
         local_discrim_loss=tf.reduce_mean((predict_local_real[-1] + EPS) -tf.reduce_mean( predict_local_fake[-1] + EPS))
 
         discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
+        
         # discrim_loss =global_discrim_loss+local_discrim_loss
 
     #flyadd 构建中央沟提取模型
     with tf.name_scope("tarCentralSul_loss"):
         with tf.variable_scope("genTeethGroove"):
-            cenSulTarget = create_generator_groove(targets,1, condition=condition2)
+            cenSulTarget = create_generator_groove(targets,1)
     with tf.name_scope("outCentralSul_loss"):
         with tf.variable_scope("genTeethGroove", reuse=True):
-            cenSulOutput = create_generator_groove(outputs,1, condition=condition2)
+            cenSulOutput = create_generator_groove(outputs,1)
     #flyadd
 
 
@@ -926,8 +930,8 @@ def create_model(inputs, condition1, condition2, targets):
         )
     )
         # 將上述多個損失以權重加權求和，平衡不同損失的影響。
-        # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+hist_loss * a.hist_weight
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight+gen_loss_CenSul*a.cenSul_weight+histogram_loss*a.hist_weight
+        # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+histogram_loss * a.hist_weight
+        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+histogram_loss * a.hist_weight
 
     # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
     with tf.name_scope("discriminator_train"):
@@ -948,8 +952,8 @@ def create_model(inputs, condition1, condition2, targets):
     # 指標的滑動平均值計算，用於平滑損失曲線，讓訓練過程中的指標更加穩定
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
     #  gen_per_loss ,discrim_loss_per,
-    # update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,hist_loss])
-    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_per_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul,histogram_loss])
+    # update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,histogram_loss])
+    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss,histogram_loss])
     # 管理訓練步驟，global_step 是 TensorFlow 內建變量，用於記錄當前訓練進行的步數。
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step + 1)
@@ -963,14 +967,12 @@ def create_model(inputs, condition1, condition2, targets):
         global_discrim_loss=ema.average(global_discrim_loss),
         local_discrim_loss=ema.average(local_discrim_loss),
         discrim_loss_per=ema.average(discrim_loss_per),
-
         discrim_grads_and_vars=discrim_grads_and_vars,
         gen_loss_GAN=ema.average(gen_loss_GAN),
         gen_loss_L1=ema.average(gen_loss_L1),
         gen_loss_CenSul=ema.average(gen_loss_CenSul),
         gen_per_loss=ema.average(gen_per_loss),
         histogram_loss=ema.average(histogram_loss),
-
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
         train=tf.group(update_losses, incr_global_step, gen_train),
@@ -1039,20 +1041,20 @@ def main():
     #     if tf.__version__.split('.')[0] != "1":
     #         raise Exception("Tensorflow version 1 required")
 
-    # 训练的时候的参数(由于采用
+    # # 训练的时候的参数(由于采用
     # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
-    # # 训练的时候的参数(由于采用
-    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
-    a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThis250//"
-    a.max_epochs=400
-    a.which_direction = "BtoA"
-
-    # a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThisV1//"
-    # a.mode = "export"
-    # a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//GANL1pergronetTESThisV1export//"
+    # # # # # 训练的时候的参数(由于采用
+    # a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
+    # a.mode = "train"
+    # a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISscalesize256nostage//"
+    # a.max_epochs=400
     # a.which_direction = "BtoA"
+
+    a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISscalesize256nostage//"
+    a.mode = "export"
+    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DAISscalesize256nostage//"
+    a.which_direction = "BtoA"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
@@ -1295,7 +1297,7 @@ def main():
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
     tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
     tf.summary.scalar("generator_loss_per", model.gen_per_loss)
-    tf.summary.scalar("hist_loss", model.histogram_loss)
+    tf.summary.scalar("histogram_loss", model.histogram_loss)
 
     # 對所有可訓練的變數（如權重、偏置）繪製直方圖，記錄其值的分布
     for var in tf.trainable_variables():
