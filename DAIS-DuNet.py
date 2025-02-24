@@ -1,4 +1,3 @@
-#use myself code
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -13,196 +12,111 @@ import random
 import collections
 import math
 import time
-# 參考
-# https://colab.research.google.com/drive/182CGDnFxt08NmjCCTu5jDweUjn3jhB2y
+
 parser = argparse.ArgumentParser()
-#--input_dir:包含圖像的文件夾路徑。
 parser.add_argument("--input_dir", help="path to folder containing images")
-# which_direction #選項：train, test, export 運行模式。
-parser.add_argument("--mode", choices=["train", "test", "export"])
-# 輸出文件存放位置。
-parser.add_argument("--output_dir", help="where to put output files")
-#--seed:類型：int 說明：隨機種子
+parser.add_argument("--mode", choices=["train", "test", "export"])  # which_direction
+parser.add_argument("--output_dir", help="where to put output files")  # required=True,
 parser.add_argument("--seed", type=int)
-#--checkpoint:說明：要恢復訓練或測試的檢查點目錄。 用途：指定提取特徵的檢查點目錄。
 parser.add_argument("--checkpoint", default=None,
                     help="directory with checkpoint to resume training from or use for testing")
-#--cktCentralSul:說明：提取牙齒中央溝特徵的檢查點目錄。
+#flyadd
 parser.add_argument("--cktCentralSul", default=None,
                     help="directory with checkpoint to extract teeth central groove features")
-#--max_steps:說明：訓練步數（設為0則禁用）。用途：限制訓練的最大步數。
+#flyadd
+
 parser.add_argument("--max_steps", type=int, help="number of training steps (0 to disable)")
-#--max_epochs:類型：int說明：訓練輪數。用途：限制訓練的最大輪數。
 parser.add_argument("--max_epochs", type=int, help="number of training epochs")
-#--summary_freq:類型：int默認值：100說明：更新和保存訓練過程的摘要信息。包括損失函數值、學習率、模型參數分佈等
+# 日志记录迭代步数
 parser.add_argument("--summary_freq", type=int, default=100, help="update summaries every summary_freq steps")
-#--progress_freq:類型：int默認值：50說明：用途：包括當前步數、損失值、訓練速度等即時信息。
 parser.add_argument("--progress_freq", type=int, default=50, help="display progress every progress_freq steps")
-#--trace_freq:類型：int默認值：0說明：包括每個操作的執行時間、內存使用等。跟蹤會顯著降低執行速度，所以默認值為0（即不跟蹤）。
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
-#--display_freq:類型：int默認值：2000說明：每display_freq步寫當前訓練圖像。用途：設置圖像顯示的頻率。
-parser.add_argument("--display_freq", type=int, default=100,
+parser.add_argument("--display_freq", type=int, default=1000,
                     help="write current training images every display_freq steps")
-# --save_freq:類型：int默認值：2000說明：每save_freq步保存模型（設為0則禁用）。用途：設置模型保存的頻率。
 parser.add_argument("--save_freq", type=int, default=1000, help="save model every save_freq steps, 0 to disable")
-#--aspect_ratio:類型：float默認值：1.0說明：輸出圖像的寬高比。用途：設置輸出圖像的寬高比。
+
 parser.add_argument("--aspect_ratio", type=float, default=1.0, help="aspect ratio of output images (width/height)")
-#--lab_colorization:類型：布爾說明：將輸入圖像分為亮度（A）和顏色（B）。用途：啟用或禁用LAB顏色分離。
 parser.add_argument("--lab_colorization", action="store_true",
                     help="split input image into brightness (A) and color (B)")
-#--batch_size:類型：int默認值：1說明：批次中的圖像數量。用途：設置訓練批次的大小。
 parser.add_argument("--batch_size", type=int, default=1, help="number of images in batch")
-# --which_direction:類型：str默認值：AtoB選項：AtoB, BtoA說明：圖像轉換方向。用途：指定圖像轉換的方向。
 parser.add_argument("--which_direction", type=str, default="AtoB", choices=["AtoB", "BtoA"])
-# --ngf:類型：int默認值：64說明：第一個卷積層中生成器濾波器的數量。用途：設置生成器第一層的濾波器數量。
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
-# --ndf:類型：int默認值：64說明：第一個卷積層中判別器濾波器的數量。用途：設置判別器第一層的濾波器數量。
 parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
-# --nldf:類型：int默認值：32說明：第一個卷積層中局部判別器濾波器的數量。用途：設置局部判別器第一層的濾波器數量。
-parser.add_argument("--nldf", type=int, default=128, help="number of local discriminator filters in first conv layer")
+parser.add_argument("--nldf", type=int, default=32, help="number of local discriminator filters in first conv layer")
 parser.add_argument("--scale_size", type=int, default=800, help="scale images to this size before cropping to 256x256")
-#--scale_size:類型：int默認值：800說明：在裁剪到256x256之前將圖像縮放到此大小。用途：設置圖像縮放的大小。
 parser.add_argument("--flip", dest="flip", action="store_true", help="flip images horizontally")
 parser.add_argument("--no_flip", dest="flip", action="store_false", help="don't flip images horizontally")
-# --flip 和 --no_flip:類型：布爾說明：水平翻轉圖像。用途：設置是否水平翻轉圖像。
 parser.set_defaults(flip=True)
 parser.add_argument("--lr", type=float, default=0.0002, help="initial learning rate for adam")
-#--lr:類型：float默認值：0.0002說明：Adam優化器的初始學習率。用途：設置學習率。
 parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
-# --beta1:類型：float默認值：0.5說明：Adam優化器的動量項。用途：設置Adam優化器的動量。
 parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
-#--l1_weight:類型：float默認值：100.0說明：生成器梯度的L1項權重。用途：設置L1損失的權重。
-parser.add_argument("--per_weight", type=float, default=50.0, help="weight on per term for generator gradient")#50
-# 感知損失 for 生成器
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
-parser.add_argument("--discrim_m", type=float, default=0.25, help="margin on GAN term for distrim percernal loss")
-parser.add_argument("--dis_per_w", type=float, default=100.0, help="weight on GAN term for distrim percernal loss")#100
-# 感知損失 for 鑑別器
-# --gan_weight:類型：float默認值：1.0說明：生成器梯度的GAN項權重。用途：設置GAN損失的權重。
 parser.add_argument("--cenSul_weight", type=float, default=100.0, help="weight on GAN term for central Sul loss")
-# --cenSul_weight:類型：float默認值：100.0說明：中央溝損失的權重。用途：設置中央溝損失的權重。
+
+# export options
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
-# --output_filetype:類型：str默認值：png選項：png, jpeg說明：輸出文件類型。用途：設置輸出文件的格式。
 a = parser.parse_args()
-# argparse模塊來解析命令行參數。所有在之前定義的參數都會被解析並存儲在a這個變量中。
+
 EPS = 1e-12
 CROP_SIZE = 256
-# EPS: 一個非常小的數，用來避免數值計算中的除零錯誤。
-# CROP_SIZE: 定義圖像裁剪的大小，這裡是256。
-Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condition2, targets, count, steps_per_epoch")
-# Examples的命名元組，包含以下字段：
-# paths: 圖像路徑列表。
-# inputs: 輸入圖像。
-# condition1: 條件1（可能是用於圖像轉換的某些條件）。
-# condition2: 條件2（另一個條件）。
-# targets: 目標圖像（真實圖像或轉換後的圖像）。
-# count: 圖像的總數。
-# steps_per_epoch: 每個epoch的步數。
-# discrim_loss_per、gen_per_loss
-Model = collections.namedtuple("Model",
-                               "outputs, predict_real, predict_fake,"
-                               "global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
-# Model的命名元組，包含以下字段：
-# outputs: 生成的圖像輸出。
-# predict_real: 對真實圖像的預測結果。
-# predict_fake: 對假圖像的預測結果。
-# global_discrim_loss: 全局判別器的損失。
-# local_discrim_loss: 局部判別器的損失。
-# discrim_grads_and_vars: 判別器的梯度和變量。
-# gen_loss_GAN: 生成器的GAN損失。
-# gen_loss_L1: 生成器的L1損失。
-# gen_loss_CenSul: 生成器的中央溝損失。
-# gen_grads_and_vars: 生成器的梯度和變量。
-# train: 訓練操作。
 
-# GAN中用於圖像數據的預處理
+Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condition2, targets, count, steps_per_epoch")
+Model = collections.namedtuple("Model",
+                               "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_grads_and_vars, train")
+
+
+
 def preprocess(image):
     with tf.name_scope("preprocess"):
-        # 圖像像素值從[0, 1]範圍轉換到[-1, 1]範圍。
         # [0, 1] => [-1, 1]
         return image * 2 - 1
 
-# GAN中用於圖像數據的後處理
+
 def deprocess(image):
     with tf.name_scope("deprocess"):
-        # 圖像像素值從[-1, 1]範圍轉回[0, 1]範圍。
         # [-1, 1] => [0, 1]
         return (image + 1) / 2
 
-# 將顏色分為亮度 (L)、綠紅分量 (a)、和藍黃分量 (b)
+
 # preprocess lab
 def preprocess_lab(lab):
     with tf.name_scope("preprocess_lab"):
-        # 分解成 L、a 和 b 三個單獨的通道。
         L_chan, a_chan, b_chan = tf.unstack(lab, axis=2)
-        # L_chan（亮度通道）：原始範圍是 [0, 100]，被轉換到 [-1, 1] 的範圍。
-        # 計算過程：L_chan / 50 - 1，這樣 [0, 100] 會對應到 [-1, 1]。
-        # a_chan 和 b_chan（色彩通道）：原始範圍大約是 [-110, 110]，也被縮放到 [-1, 1]。
-        # # 計算過程：a_chan / 110 和 b_chan / 110
         # L_chan: black and white with input range [0, 100]
         # a_chan/b_chan: color channels with input range ~[-110, 110], not exact
         # [0, 100] => [-1, 1],  ~[-110, 110] => [-1, 1]
         return [L_chan / 50 - 1, a_chan / 110, b_chan / 110]
 
-# 模型輸出的標準化數據轉回 Lab 顏色空間，恢復到原始的範圍，以便可視化或作為最終輸出。
-# L_chan：逆轉換回 [0, 100] 的範圍。
-# 計算過程：(L_chan + 1) / 2 * 100，這樣 [-1, 1] 會被轉換回 [0, 100]。
-# a_chan 和 b_chan：逆轉換回大約 [-110, 110] 的範圍。
-# 計算過程：a_chan * 110 和 b_chan * 110。
+
 def deprocess_lab(L_chan, a_chan, b_chan):
     with tf.name_scope("deprocess_lab"):
         # this is axis=3 instead of axis=2 because we process individual images but deprocess batches
-        #  最後使用 tf.stack 將三個通道重新合併成圖像
-        # 這次的 axis=3 是因為要處理的是一個批次的圖像，通常形狀為 [batch_size, height, width, 3]
         return tf.stack([(L_chan + 1) / 2 * 100, a_chan * 110, b_chan * 110], axis=3)
 
 
-# L 通道：表示亮度（lightness），範圍從 0（黑色）到 100（白色）。
-# a 通道：表示從綠色到紅色的色彩分佈，範圍約為 -110（綠色）到 110（紅色）。
-# b 通道：表示從藍色到黃色的色彩分佈，範圍約為 -110（藍色）到 110（黃色）。
-# 在將經過增強的亮度通道 (L channel) 與圖像的色彩通道 (a 和 b channels) 組合，然後將其轉換回 RGB 顏色空間。
-# 目的是對圖像進行增強處理（如亮度調整），並將處理後的圖像輸出為 RGB 格式。
 def augment(image, brightness):
     # (a, b) color channels, combine with L channel and convert to rgb
-    # 這行代碼將 image 沿第 3 軸解壓，分解為單獨的 a 和 b 色彩通道。
     a_chan, b_chan = tf.unstack(image, axis=3)
-    # 這行代碼將 brightness 沿第 3 軸壓縮，去除單通道的維度，得到 L 通道。
     L_chan = tf.squeeze(brightness, axis=3)
-    # 使用 deprocess_lab 函數將 L、a 和 b 通道重新合併，並將其逆轉換回標準的 Lab 色彩空間範圍。
     lab = deprocess_lab(L_chan, a_chan, b_chan)
-    # 將 Lab 顏色空間的圖像轉換為 RGB 顏色空間，使其適合於可視化或模型輸出。
     rgb = lab_to_rgb(lab)
     return rgb
 
 
 def conv(batch_input, out_channels, stride):
     with tf.variable_scope("conv"):
-        # 輸入張量的最後一個維度。這用來定義卷積核的輸入通道數。
         in_channels = batch_input.get_shape()[3]
-        # 建立一個卷積核，形狀為 [4, 4, in_channels, out_channels]，
-        # 其中 4x4 是卷積核的空間尺寸，in_channels 是輸入通道數，out_channels 是輸出的通道數。
-        # 隨機初始化卷積核的權重。
         filter = tf.get_variable("filter", [4, 4, in_channels, out_channels], dtype=tf.float32,
                                  initializer=tf.random_normal_initializer(0, 0.02))
         # [batch, in_height, in_width, in_channels], [filter_width, filter_height, in_channels, out_channels]
         #     => [batch, out_height, out_width, out_channels]
-        # [0, 0]：對 batch 維度不進行填充。
-        # [1, 1]：對高度維度每側填充 1。
-        # [1, 1]：對寬度維度每側填充 1。
-        # [0, 0]：對通道維度不進行填充。
-        # mode=CONSTANT指定了填充的模式
+        # 暫時還不明白 [0,0],[1,1],[1,1],[0,0]
         padded_input = tf.pad(batch_input, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-        # [1, stride, stride, 1] 表示卷積運行的步長，
-        # 其中 1 表示 batch 和 channels 維度不進行步進，只在高度和寬度維度以 stride 進行步進。
-        # adding="VALID" 表示沒有額外的填充，這意味著輸出尺寸會因卷積核減小。
         conv = tf.nn.conv2d(padded_input, filter, [1, stride, stride, 1], padding="VALID")
         return conv
 
-# Leaky ReLU（Leaky Rectified Linear Unit）激活函數
+
 def lrelu(x, a):
-    # 並使用 a 作為負斜率。Leaky ReLU 是 ReLU 的變體，
-    # 在輸入值為負時允許一些負輸出，避免 ReLU 出現「死亡」神經元問題。
-    # 這樣在輸入值小於零時，激活函數仍會有梯度，從而能夠幫助網絡學習。
     with tf.name_scope("lrelu"):
         # adding these together creates the leak part and linear part
         # then cancels them out by subtracting/adding an absolute value term
@@ -210,32 +124,22 @@ def lrelu(x, a):
         # linear: x/2 + abs(x)/2
 
         # this block looks like it has 2 inputs on the graph unless we do this
-        # 為了確保 x 被視為計算圖中的一個單獨節點
+        # 返回一個一模一樣的tesnsor並且增加一個新的節點到gragh中
         x = tf.identity(x)
-        # 0.5 * (1 + a) * x：這是輸入值 x 的線性部分。
-        # 0.5 * (1 - a) * tf.abs(x)：這是輸入值絕對值的部分，用於控制當輸入為負時的輸出。
-        # 在正數區域，Leaky ReLU 和 ReLU 表現一樣，在負數區域，輸出是 a * x，這個 a 是設置的負斜率。
         return (0.5 * (1 + a)) * x + (0.5 * (1 - a)) * tf.abs(x)
 
-# 批歸一化（Batch Normalization）操作，它有助於加速訓練速度和提高神經網絡的穩定性。
 
 def batchnorm(input):
     with tf.variable_scope("batchnorm"):
-        #創建了一個與輸入 input 一樣的張量，並在計算圖中增加了一個節點
+        # this block looks like it has 3 inputs on the graph unless we do this
         input = tf.identity(input)
-        # 獲取輸入張量中通道的數量
+
         channels = input.get_shape()[3]
-        # 對應於批歸一化後的平移項，初始化為全零。
         offset = tf.get_variable("offset", [channels], dtype=tf.float32, initializer=tf.zeros_initializer())
-        # 對應於批歸一化後的縮放項，初始值為服從均值為 1.0，標準差為 0.02 的正態分佈。
         scale = tf.get_variable("scale", [channels], dtype=tf.float32,
                                 initializer=tf.random_normal_initializer(1.0, 0.02))
-        # 計算 input 在 [0, 1, 2]（即 batch, height, width 維度）上的均值和方差，這樣每個通道會單獨計算均值和方差。
         mean, variance = tf.nn.moments(input, axes=[0, 1, 2], keep_dims=False)
-        # 是一個小的常數，用於防止在歸一化時除以零。
         variance_epsilon = 1e-5
-        # 將 input 正規化，使其具有零均值和單位方差，然後應用 scale 和 offset
-        # normalized = scale * ((input - mean) / sqrt(variance + variance_epsilon)) + offset
         normalized = tf.nn.batch_normalization(input, mean, variance, offset, scale, variance_epsilon=variance_epsilon)
         return normalized
 
@@ -254,7 +158,7 @@ def deconv(batch_input, out_channels):
 
 
 def check_image(image):
-    assertion = tf.assert_equal(tf.shape(image)[-1], 3, message="image must have 3 color channels")
+    assertion = tf.assert_equal(tf.shape(image)[-1], 1, message="image must have 3 color channels")
     with tf.control_dependencies([assertion]):
         image = tf.identity(image)
 
@@ -263,7 +167,7 @@ def check_image(image):
 
     # make the last dimension 3 so that you can unstack the colors
     shape = list(image.get_shape())
-    shape[-1] = 3
+    shape[-1] = 1
     image.set_shape(shape)
     return image
 
@@ -572,16 +476,7 @@ def create_model(inputs, targets):
             layers.append(output)
 
         return layers[-1]
-    def perceptual_Loss(perceTarget, perceOutput):
-        weight = [1.0,2.0,2.0]
-        perLoss=[]
-        for i in range(len(perceTarget)-1):
-            if i==0:
-                perLoss.append(tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i])
-            else:
-                temploss = perLoss[-1] +tf.reduce_mean(tf.abs(perceTarget[i] - perceOutput[i])) * weight[i]
-                perLoss.append(temploss)
-        return perLoss[-1]
+
     # gan local discriminator
     def create_local_discriminator(discrim_inputs, discrim_targets):
         n_layers = 2
@@ -619,7 +514,6 @@ def create_model(inputs, targets):
 
         return layers[-1]
 
-
     # gan generator
     with tf.variable_scope("generator") as scope:
         out_channels = int(targets.get_shape()[-1])
@@ -652,10 +546,9 @@ def create_model(inputs, targets):
         # minimizing -tf.log will try to get inputs to 1
         # predict_real => 1
         # predict_fake => 0
-        discrim_loss_per = tf.nn.relu(tf.subtract(a.discrim_m,perceptual_Loss(predict_real,predict_fake)))
         global_discrim_loss=tf.reduce_mean(-(tf.log(predict_real + EPS) + tf.log(1 - predict_fake + EPS)))
         local_discrim_loss=tf.reduce_mean(-(tf.log(predict_local_real + EPS) + tf.log(1 - predict_local_fake + EPS)))
-        discrim_loss =global_discrim_loss+local_discrim_loss+discrim_loss_per*a.dis_per_w
+        discrim_loss =global_discrim_loss+local_discrim_loss
 
     #flyadd 构建中央沟提取模型
     with tf.name_scope("tarCentralSul_loss"):
@@ -672,9 +565,8 @@ def create_model(inputs, targets):
         # abs(targets - outputs) => 0
         gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake + EPS))
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
-        gen_per_loss=perceptual_Loss(predict_real,predict_fake)
         gen_loss_CenSul=tf.reduce_mean(tf.abs(cenSulTarget - cenSulOutput))
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight
+        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight
 
     with tf.name_scope("discriminator_train"):
         discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
@@ -692,8 +584,7 @@ def create_model(inputs, targets):
 
 
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
-    #  gen_per_loss ,discrim_loss_per,
-    update_losses = ema.apply([global_discrim_loss,discrim_loss_per,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul, gen_per_loss])
+    update_losses = ema.apply([global_discrim_loss,local_discrim_loss, gen_loss_GAN, gen_loss_L1,gen_loss_CenSul])
 
     global_step = tf.contrib.framework.get_or_create_global_step()
     incr_global_step = tf.assign(global_step, global_step + 1)
@@ -703,14 +594,10 @@ def create_model(inputs, targets):
         predict_fake=cenSulOutput,
         global_discrim_loss=ema.average(global_discrim_loss),
         local_discrim_loss=ema.average(local_discrim_loss),
-        discrim_loss_per=ema.average(discrim_loss_per),
-
         discrim_grads_and_vars=discrim_grads_and_vars,
         gen_loss_GAN=ema.average(gen_loss_GAN),
         gen_loss_L1=ema.average(gen_loss_L1),
         gen_loss_CenSul=ema.average(gen_loss_CenSul),
-        gen_per_loss=ema.average(gen_per_loss),
-
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
         train=tf.group(update_losses, incr_global_step, gen_train),
@@ -769,22 +656,18 @@ def main():
     #         raise Exception("Tensorflow version 1 required")
 
     #加载提取中央沟的ckeckpoint
-    # a.cktCentralSul = "E:/YuanFLY/ckt/imageCentralSul2019051801"
+    a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
     # # 训练的时候的参数(由于采用
-    # a.input_dir = "E:/YuanFLY/data/train/imageCentralSul2019051803"
+    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     # a.mode = "train"
-    # a.output_dir = "E:/YuanFLY/ckt/imageCentralSul2019051803"
+    # a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//DAISDUNET//"
     # a.max_epochs=800
     # a.which_direction = "BtoA"
-    a.cktCentralSul = "D://Users//user//Desktop//papergan//paper//crown//traincode//grrovenew//"
+    a.mode = "export"
+    a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISDUNET/"
+    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/exportDAISDUNET/"
 
-    # 训练的时候的参数(由于采用
-    a.input_dir =  "D://Users//user//Desktop//papergan//paper//crown//traincode//triandata//"
-    a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//papergan//paper//crown//Dunet0629//"
-    a.max_epochs=800
-    a.which_direction = "BtoA"
 
     #测试的时候的参数
     # a.input_dir = "E:/YuanFLY/data/val/imageCentralSul2019051802"
@@ -843,20 +726,20 @@ def main():
         input_image = tf.image.decode_png(input_data)
 
         # remove alpha channel if present
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :3], lambda: input_image)
+        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :1], lambda: input_image)
         # convert grayscale to RGB
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
-                              lambda: input_image)
+        # input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
+        #                       lambda: input_image)
         # fly圖片歸一化0-1 浮點數據類型
         input_image = tf.image.convert_image_dtype(input_image, dtype=tf.float32)
         # fly設置圖片類型
-        input_image.set_shape([CROP_SIZE, CROP_SIZE, 3])
+        input_image.set_shape([CROP_SIZE, CROP_SIZE, 1])
         # fly增加圖片維度 axis=0 代表增加在前面加一維 -1在後面
         batch_input = tf.expand_dims(input_image, axis=0)
         # variable_scope变量有相同的命名
         # preprocess和deprocess 對圖片進行了處理
         with tf.variable_scope("generator"):
-            batch_output = deprocess(create_generator(preprocess(batch_input), 3))
+            batch_output = deprocess(create_generator(preprocess(batch_input), 1))
 
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
         if a.output_filetype == "png":
@@ -981,11 +864,9 @@ def main():
 
     tf.summary.scalar("global_discriminator_loss", model.global_discrim_loss)
     tf.summary.scalar("local_discriminator_loss", model.local_discrim_loss)
-    tf.summary.scalar("discriminator_loss_per", model.discrim_loss_per)
     tf.summary.scalar("generator_loss_GAN", model.gen_loss_GAN)
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
     tf.summary.scalar("generator_loss_cenSul", model.gen_loss_CenSul)
-    tf.summary.scalar("generator_loss_per", model.gen_per_loss)
 
     for var in tf.trainable_variables():
         tf.summary.histogram(var.op.name + "/values", var)
@@ -1066,12 +947,9 @@ def main():
                 if should(a.progress_freq):
                     fetches["global_discrim_loss"] = model.global_discrim_loss
                     fetches["local_discrim_loss"] = model.local_discrim_loss
-                    fetches["discrim_loss_per"] = model.discrim_loss_per
                     fetches["gen_loss_GAN"] = model.gen_loss_GAN
                     fetches["gen_loss_L1"] = model.gen_loss_L1
                     fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
-                    fetches["gen_per_loss"] = model.gen_per_loss
-
 
                 if should(a.summary_freq):
                     fetches["summary"] = sv.summary_op
@@ -1104,12 +982,9 @@ def main():
                     train_epoch, train_step, rate, remaining / 60))
                     print("global_discrim_loss", results["global_discrim_loss"])
                     print("local_discrim_loss", results["local_discrim_loss"])
-                    print("discrim_loss_per", results["discrim_loss_per"])
                     print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
                     print("gen_loss_CenSul", results["gen_loss_CenSul"])
-                    print("gen_per_loss", results["gen_per_loss"])
-
 
                 if should(a.save_freq):
                     print("saving model")

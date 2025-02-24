@@ -46,10 +46,10 @@ parser.add_argument("--progress_freq", type=int, default=50, help="display progr
 #--trace_freq:類型：int默認值：0說明：包括每個操作的執行時間、內存使用等。跟蹤會顯著降低執行速度，所以默認值為0（即不跟蹤）。
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
 #--display_freq:類型：int默認值：2000說明：每display_freq步寫當前訓練圖像。用途：設置圖像顯示的頻率。
-parser.add_argument("--display_freq", type=int, default=500,
+parser.add_argument("--display_freq", type=int, default=5000,
                     help="write current training images every display_freq steps")
 # --save_freq:類型：int默認值：2000說明：每save_freq步保存模型（設為0則禁用）。用途：設置模型保存的頻率。
-parser.add_argument("--save_freq", type=int, default=1000, help="save model every save_freq steps, 0 to disable")
+parser.add_argument("--save_freq", type=int, default=5000, help="save model every save_freq steps, 0 to disable")
 #--aspect_ratio:類型：float默認值：1.0說明：輸出圖像的寬高比。用途：設置輸出圖像的寬高比。
 parser.add_argument("--aspect_ratio", type=float, default=1.0, help="aspect ratio of output images (width/height)")
 #--lab_colorization:類型：布爾說明：將輸入圖像分為亮度（A）和顏色（B）。用途：啟用或禁用LAB顏色分離。
@@ -110,6 +110,9 @@ Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condit
 # discrim_loss_per、gen_per_loss
 # Model = collections.namedtuple("Model",
 #                                "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,gen_loss_CenSul, gen_grads_and_vars, train")
+# Model = collections.namedtuple("Model",
+#                                "outputs,predict_local_real0,predict_local_fake0, predict_local_real1,predict_local_fake1, predict_local_real2,predict_local_fake2, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss,gen_loss_CenSul, gen_grads_and_vars, train")
+
 Model = collections.namedtuple("Model",
                                "outputs, predict_real, predict_fake, global_discrim_loss,local_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss,gen_loss_CenSul, gen_grads_and_vars, train")
 # Model的命名元組，包含以下字段：
@@ -764,19 +767,15 @@ def create_model(inputs, condition1, condition2, targets):
     def perceptual_Loss(perceTarget, perceOutput):
         # 設定每層權重
         weights = [1.0, 2.0, 2.0]
-        total_weighted_loss = 0.0
-
-        for i in range(len(perceTarget) - 2):  # 假設感知損失只考慮到倒數第三層
-            # 取得當前層的形狀資訊
-            _, height, width, channels = perceTarget[i].shape
-            feature_count = tf.cast(height * width * channels, tf.float32)  # C_i * H_i * W_i
-
-            # 計算該層的感知損失並累加
-            diff = tf.abs(perceTarget[i] - perceOutput[i])  # \| h_i(z) - h_i(G) \|
-            layer_loss = tf.reduce_mean(diff)  # 該層損失
-            total_weighted_loss += weights[i]* feature_count * layer_loss  # 加權累加
- 
-        return total_weighted_loss
+        perLoss = 0.0
+        for i in range(len(perceTarget)-2):
+            # Calculate the size of the feature map
+            C, H, W = tf.shape(perceTarget[i])[1], tf.shape(perceTarget[i])[2], tf.shape(perceTarget[i])[3]
+            normalization_factor = tf.cast(C * H * W, tf.float32)
+            # Compute the mean absolute difference normalized by feature map size and weighted by lambda
+            loss = weights[i] * tf.reduce_sum(tf.abs(perceTarget[i] - perceOutput[i])) / normalization_factor
+            perLoss += loss
+        return perLoss
     
     
     # gan local discriminator
@@ -865,7 +864,7 @@ def create_model(inputs, condition1, condition2, targets):
     with tf.name_scope("real_local_discriminator"):
         with tf.variable_scope("local_discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_real = create_local_discriminator(inputs, condition1, condition2, outputs)
+            predict_local_real = create_local_discriminator(inputs, condition1, condition2, targets)
 
     with tf.name_scope("fake_local_discriminator"):
         # Setting reuse=True avoids creating new variables and reuses the ones from the local  real discriminator.
@@ -908,7 +907,7 @@ def create_model(inputs, condition1, condition2, targets):
         # 看起來這邊還要加值方圖損失函式在L1那邊
         # GAN Loss=−log(D(G(z)))
         # -log(predict_fake)，當 predict_fake 趨近 1 時，損失會接近 0。
-        gen_loss_GAN = -tf.reduce_mean((predict_fake[-1]))#1
+        gen_loss_GAN = tf.reduce_mean((predict_fake[-1]))#1
         #  (outputs) 接近目標圖像 (targets)，提高生成結果的真實性。
         # L1 損失對像素值差異的敏感性較低，通常比 L2 損失更適合圖像生成。
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))#2
@@ -959,9 +958,27 @@ def create_model(inputs, condition1, condition2, targets):
     incr_global_step = tf.assign(global_step, global_step + 1)
     # train=tf.group(update_losses, incr_global_step, gen_train) 
     # 將指標更新、步驟遞增和生成器訓練綁定在一起，形成完整的訓練步驟。
+    def mean_hide_layer(tensorlayer):
+            tensordis=tensorlayer.get_shape().as_list()
+            numdis=len(tensordis)
+            lastdis=tensordis[numdis-1]
+            layers=[]
+            for i in range(lastdis):
+                if i==0:
+                    layers.append(tf.slice(tensorlayer, [0, 0, 0, i], [1, -1, -1, 1]))
+                else:
+                    templayer= layers[-1]+tf.slice(tensorlayer, [0, 0, 0, i], [1, -1, -1, 1])
+                    layers.append(templayer)
+            return layers[-1]/lastdis
     return Model(
         # predict_real=cenSulTarget,
         # predict_fake=cenSulOutput,
+        # predict_local_real0=predict_local_real[0],
+        # predict_local_fake0=predict_local_fake[0],
+        # predict_local_real1=predict_local_real[1],
+        # predict_local_fake1=predict_local_fake[1],
+        # predict_local_real2=predict_local_real[2],
+        # predict_local_fake2=predict_local_fake[2],
         predict_real=predict_real[-1],
         predict_fake=predict_fake[-1],
         global_discrim_loss=ema.average(global_discrim_loss),
@@ -1041,20 +1058,20 @@ def main():
     #     if tf.__version__.split('.')[0] != "1":
     #         raise Exception("Tensorflow version 1 required")
 
-    # # 训练的时候的参数(由于采用
-    # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
+    # # # 训练的时候的参数(由于采用
+    a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
-    # # # # # 训练的时候的参数(由于采用
-    # a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
-    # a.mode = "train"
-    # a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISscalesize256nostage//"
-    # a.max_epochs=400
-    # a.which_direction = "BtoA"
-
-    a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISscalesize256nostage//"
-    a.mode = "export"
-    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DAISscalesize256nostage//"
+    # # # # # # # 训练的时候的参数(由于采用
+    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//depthfordifferentr//DAISdepth//r=2//final"
+    a.mode = "train"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//testre=2//"
+    a.max_epochs=400
     a.which_direction = "BtoA"
+
+    # a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DCPRr=0papernohistorgram//"
+    # a.mode = "export"
+    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DCPRr=0papernohistorgram//"
+    # a.which_direction = "BtoA"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
@@ -1232,7 +1249,28 @@ def main():
             image = tf.image.resize_images(image, size=size, method=tf.image.ResizeMethod.BICUBIC)
 
         return tf.image.convert_image_dtype(image, dtype=tf.uint8, saturate=True)
+    def save_images_hide(name,fetches):
+        if not os.path.exists(name):
+            os.makedirs(name)
+        inputs_save = deprocess(fetches)
+        shape_list=inputs_save.shape
+        len_list=len(shape_list)
+        num_batch=shape_list[len_list-1]
+        #print(num_batch)
+        #print(shape_list)
+        for i in range(num_batch):
+            image=inputs_save[0,:,:,i]
+            cv2.imwrite(name+ str(i) + '.jpg', image)
 
+
+        #im = Image.fromarray(image)
+        #im.save('/home/yuanfly/pix2pix/facades/RestoreTeeth/img.jpg')
+        #converted_saves = convert(inputs_save)
+
+        #matplotlib.image.imsave('/home/yuanfly/pix2pix/facades/RestoreTeeth/img.png', inputs_save)
+        #with open('/home/yuanfly/pix2pix/facades/RestoreTeeth/img.txt', "wb") as f:
+            #f.write(inputs_save)
+        return
     # reverse any processing on images so they can be written to disk or displayed to user
     with tf.name_scope("convert_inputs"):
         converted_inputs = convert(inputs)
@@ -1273,6 +1311,15 @@ def main():
 
     with tf.name_scope("cenSulReal_summary"):
         tf.summary.image("sulReal", converted_cenSulReal)
+    #with tf.name_scope("predict_real_summary"):
+        #tf.summary.image("predict_local_real0", tf.image.convert_image_dtype(model.predict_local_real0, dtype=tf.uint8))
+        #tf.summary.image("predict_local_real1", tf.image.convert_image_dtype(model.predict_local_real1, dtype=tf.uint8))
+        #tf.summary.image("predict_local_real2", tf.image.convert_image_dtype(model.predict_local_real2, dtype=tf.uint8))
+
+    #with tf.name_scope("predict_fake_summary"):
+        #tf.summary.image("predict_local_fake0", tf.image.convert_image_dtype(model.predict_local_fake0, dtype=tf.uint8))
+        #tf.summary.image("predict_local_fake1", tf.image.convert_image_dtype(model.predict_local_fake1, dtype=tf.uint8))
+        #tf.summary.image("predict_local_fake2", tf.image.convert_image_dtype(model.predict_local_fake2, dtype=tf.uint8))
 
     # with tf.name_scope("predict_real_summary"):
     #     tf.summary.image("predict_real", tf.image.convert_image_dtype(model.predict_real, dtype=tf.uint8))
@@ -1312,7 +1359,7 @@ def main():
         parameter_count = tf.reduce_sum([tf.reduce_prod(tf.shape(v)) for v in tf.trainable_variables()])
 
 
-    #saver = tf.train.Saver(max_to_keep=1)
+    # saver = tf.train.Saver(max_to_keep=1)
     #fly modify
     #     功能：獲取 generator 範疇中的所有可訓練變數，並為其建立一個 Saver 物件。
     # 目的：從檢查點中恢復生成器的權重與偏置，但這些參數不參與之後的反向傳播。
@@ -1416,6 +1463,10 @@ def main():
                 #  不同頻率執行的操作
                 if should(a.display_freq):
                     fetches["display"] = display_fetches
+                # if should(a.saveHide_freq):
+                #     fetches["hide_layer3"] =model.predict_local_fake2
+                #     fetches["hide_layer2"] = model.predict_local_fake1
+                #     fetches["hide_layer1"] = model.predict_local_fake0
 
                 results = sess.run(fetches, options=options, run_metadata=run_metadata)
                 # 每隔 summary_freq 步記錄一次 TensorBoard 摘要，便於後續分析。
@@ -1460,6 +1511,13 @@ def main():
                     print("saving model")
                     saver.save(sess, os.path.join(a.output_dir, "model"), global_step=sv.global_step)
                 # 使用 Supervisor 判斷是否需要中斷訓練。
+                # if should(a.saveHide_freq):
+                #     print("保存中间层图像")
+                #     layer='D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//layer//'
+                #     save_images_hide(layer+str(3)+'/'+str(results["global_step"])+'/',results["hide_layer3"])
+                #     save_images_hide(layer+str(2)+'/'+ str(results["global_step"])+'/',results["hide_layer2"])
+                #     save_images_hide(layer+str(1)+'/'+ str(results["global_step"])+'/',results["hide_layer1"])
+                
                 if sv.should_stop():
                     break
 

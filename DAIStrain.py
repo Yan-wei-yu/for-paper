@@ -27,7 +27,7 @@ parser.add_argument("--max_epochs", type=int, help="number of training epochs")
 parser.add_argument("--summary_freq", type=int, default=100, help="update summaries every summary_freq steps")
 parser.add_argument("--progress_freq", type=int, default=50, help="display progress every progress_freq steps")
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
-parser.add_argument("--display_freq", type=int, default=0,
+parser.add_argument("--display_freq", type=int, default=1000,
                     help="write current training images every display_freq steps")
 parser.add_argument("--save_freq", type=int, default=1000, help="save model every save_freq steps, 0 to disable")
 
@@ -38,8 +38,8 @@ parser.add_argument("--batch_size", type=int, default=1, help="number of images 
 parser.add_argument("--which_direction", type=str, default="AtoB", choices=["AtoB", "BtoA"])
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
 parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
-parser.add_argument("--nldf", type=int, default=32, help="number of local discriminator filters in first conv layer")
-parser.add_argument("--scale_size", type=int, default=286, help="scale images to this size before cropping to 256x256")
+parser.add_argument("--nldf", type=int, default=64, help="number of local discriminator filters in first conv layer")
+parser.add_argument("--scale_size", type=int, default=256, help="scale images to this size before cropping to 256x256")
 parser.add_argument("--flip", dest="flip", action="store_true", help="flip images horizontally")
 parser.add_argument("--no_flip", dest="flip", action="store_false", help="don't flip images horizontally")
 parser.set_defaults(flip=True)
@@ -47,8 +47,13 @@ parser.add_argument("--lr", type=float, default=0.0002, help="initial learning r
 parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
 parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
-
-# export options
+# parser.add_argument("--discrim_m", type=float, default=0.35, help="margin on GAN term for distrim percernal loss")
+# parser.add_argument("--dis_per_w", type=float, default=100.0, help="weight on GAN term for distrim percernal loss")#100
+# parser.add_argument("--saveHide_freq", type=int, default=120000, help="保存隐藏层")
+# 感知損失 for 鑑別器
+# --gan_weight:類型：float默認值：1.0說明：生成器梯度的GAN項權重。用途：設置GAN損失的權重。
+# parser.add_argument("--cenSul_weight", type=float, default=50.0, help="weight on GAN term for central Sul loss")
+# --cenSul_weight:類型：float默認值：100.0說明：中央溝損失的權重。用途：設置中央溝損失的權重。
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
 a = parser.parse_args()
 
@@ -369,10 +374,14 @@ def create_generator(generator_inputs, discrimCon1, discrimCon2, generator_outpu
     layers = []
 
     #添加條件 通道方向連接
-    #generatorInputs=tf.concat([generator_inputs, discrimCon1, discrimCon2], axis=3)
     # encoder_1: [batch, 256, 256, in_channels] => [batch, 128, 128, ngf]
+    # 這行程式碼的作用是將三個張量（generator_inputs, discrimCon1, discrimCon2）沿著最後一個維度（通常是通道數維度，即 axis=3）進行拼接（concatenate）
+    # 。具體來說，這個操作的意圖是將來自不同來源的特徵圖合併為一個單一的張量，
+    generator_inputss=tf.concat([generator_inputs, discrimCon1, discrimCon2], axis=3)
     with tf.variable_scope("encoder_1"):
-        output = conv(generator_inputs, a.ngf, stride=2)
+        # output = conv(generator_inputs, a.ngf, stride=2)
+
+        output = conv(generator_inputss, a.ngf, stride=2)
         layers.append(output)
 
     layer_specs = [
@@ -443,8 +452,8 @@ def create_model(inputs, condition1, condition2, targets):
         layers = []
 
         # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
-        #input = tf.concat([discrim_inputs, discrim_con1, discrim_con2, discrim_targets], axis=3)
-        input = tf.concat([discrim_inputs, discrim_targets], axis=3)
+        input = tf.concat([discrim_inputs, discrim_con1, discrim_con2, discrim_targets], axis=3)
+        # input = tf.concat([discrim_inputs, discrim_targets], axis=3)
 
         # layer_1: [batch, 256, 256, in_channels * 2] => [batch, 128, 128, ndf]
         with tf.variable_scope("layer_1"):
@@ -469,21 +478,41 @@ def create_model(inputs, condition1, condition2, targets):
             convolved = conv(rectified, out_channels=1, stride=1)
             output = tf.sigmoid(convolved)
             layers.append(output)
-
-        return layers[-1]
-
+        # perlayers：這個列表包含了每一層的輸出結果。它包括所有中間層（rectified 激活後的層），以及最終輸出層
+        return layers
+    # perceTarget：目標圖像的特徵表示，通常是從一個預訓練的網絡中提取的特徵圖。
+    # perceOutput：生成圖像的特徵表示，通常是生成器輸出的圖像的特徵圖。
+    def perceptual_Loss(perceTarget, perceOutput):
+        # 設定每層權重
+        weights = [1.0, 2.0, 2.0]
+        perLoss = 0.0
+        for i in range(len(perceTarget)-2):
+            # Calculate the size of the feature map
+            C, H, W = tf.shape(perceTarget[i])[1], tf.shape(perceTarget[i])[2], tf.shape(perceTarget[i])[3]
+            normalization_factor = tf.cast(C * H * W, tf.float32)
+            # Compute the mean absolute difference normalized by feature map size and weighted by lambda
+            loss = weights[i] * tf.reduce_sum(tf.abs(perceTarget[i] - perceOutput[i])) / normalization_factor
+            perLoss += loss
+        return perLoss
+    
+    
     # gan local discriminator
-    def create_local_discriminator(discrim_inputs, discrim_targets):
-        n_layers = 2
+    def create_local_discriminator(discrim_inputs,discrim_con1, discrim_con2, discrim_targets):
+        n_layers = 3
         layers = []
 
         # tensor ROI区域裁剪
-        crop_inputs = tf.image.crop_to_bounding_box(discrim_inputs, 80, 80, 128, 128)
-        crop_targets = tf.image.crop_to_bounding_box(discrim_targets, 80, 80, 128, 128)
+        # crop_inputs = tf.image.crop_to_bounding_box(discrim_inputs, 80, 80, 128, 128)
+        # crop_targets = tf.image.crop_to_bounding_box(discrim_targets, 80, 80, 128, 128)
 
         # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
-        input = tf.concat([crop_inputs, crop_targets], axis=3)
-
+        # 將裁剪的輸入（crop_inputs）和目標（crop_targets）組合為一個張量。
+        # 如果每個張量的通道數為 C，拼接後的通道數將為 2C。   
+        input = tf.concat([discrim_inputs,discrim_con1, discrim_con2, discrim_targets], axis=3)
+        # 輸入：拼接後的張量。
+        # 輸出通道數：a.nldf（局部判別器的基礎通道數）。
+        # 步幅：stride=2，表示每次移動兩個像素，用於下採樣。
+        #  128x128x2C 下採樣為 64x64xC'。
         # layer_1: [batch, 128, 128, in_channels * 2] => [batch, 64, 64, nldf]
         with tf.variable_scope("layer_1"):
             convolved = conv(input, a.nldf, stride=2)
@@ -506,9 +535,13 @@ def create_model(inputs, condition1, condition2, targets):
             convolved = conv(rectified, out_channels=1, stride=1)
             output = tf.sigmoid(convolved)
             layers.append(output)
+        # 返回 layers 列表中的最後一層（輸出張量），表示局部判別器的最終判定結果。
+        return layers
 
-        return layers[-1]
-
+    # with tf.name_scope 用來管理計算圖中的命名空間，從而使代碼的結構更清晰，便於調試和查找變量。
+    #  TensorBoard 中區分或查看一組相關操作（如損失計算、可視化輸出等）的情況。
+    # with tf.variable_scope 用於對**變量（variables）**進行命名和管理，特別是共享變量的場景。 支持變量重用
+    # tf.variable_scope 用於共享變量（如生成器和判別器的參數），避免多次創建相同的變量。
     # gan generator
     with tf.variable_scope("generator") as scope:
         out_channels = int(targets.get_shape()[-1])
@@ -529,25 +562,27 @@ def create_model(inputs, condition1, condition2, targets):
     with tf.name_scope("real_local_discriminator"):
         with tf.variable_scope("local_discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_real = create_local_discriminator(inputs, targets)
+            predict_local_real = create_local_discriminator(inputs, condition1, condition2, targets)
 
     with tf.name_scope("fake_local_discriminator"):
         with tf.variable_scope("local_discriminator", reuse=True):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_fake = create_local_discriminator(inputs, outputs)
+            predict_local_fake = create_local_discriminator(inputs, condition1, condition2, outputs)
+
 
     with tf.name_scope("discriminator_loss"):
         # minimizing -tf.log will try to get inputs to 1
         # predict_real => 1
         # predict_fake => 0
-        global_discrim_loss = tf.reduce_mean(-(tf.log(predict_real + EPS) + tf.log(1 - predict_fake + EPS)))
-        local_discrim_loss = tf.reduce_mean(-(tf.log(predict_local_real + EPS) + tf.log(1 - predict_local_fake + EPS)))
+        
+        global_discrim_loss = tf.reduce_mean(-(tf.log(predict_real[-1] + EPS) + tf.log(1 - predict_fake[-1] + EPS)))
+        local_discrim_loss = tf.reduce_mean(-(tf.log(predict_local_real [-1]+ EPS) + tf.log(1 - predict_local_fake[-1] + EPS)))
         discrim_loss = global_discrim_loss + local_discrim_loss
 
     with tf.name_scope("generator_loss"):
         # predict_fake => 1
         # abs(targets - outputs) => 0
-        gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake + EPS))
+        gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake[-1] + EPS))
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
         gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight
 
@@ -571,8 +606,8 @@ def create_model(inputs, condition1, condition2, targets):
     incr_global_step = tf.assign(global_step, global_step + 1)
 
     return Model(
-        predict_real=predict_real,
-        predict_fake=predict_fake,
+        predict_real=predict_real[-1],
+        predict_fake=predict_fake[-1],
         global_discrim_loss=ema.average(global_discrim_loss),
         local_discrim_loss=ema.average(local_discrim_loss),
         discrim_grads_and_vars=discrim_grads_and_vars,
@@ -636,11 +671,17 @@ def main():
     #         raise Exception("Tensorflow version 1 required")
 
     # 训练的时候的参数(由于采用
-    a.input_dir = "D:/Tensorflow/DAIS/train"
+
+    # 训练的时候的参数(由于采用
+    a.input_dir =  "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=0/final1"
     a.mode = "train"
-    a.output_dir = "D:/Tensorflow/DAIS/Checkpoint"
-    a.max_epochs=200
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DCPRr=0retrain//"
+    a.max_epochs=250
     a.which_direction = "BtoA"
+
+    # a.mode = "export"
+    # a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISNET/"
+    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/exportDAISNET/"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
@@ -701,14 +742,14 @@ def main():
         input_image = tf.image.decode_png(input_data)
 
         # remove alpha channel if present
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :3], lambda: input_image)
+        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :1], lambda: input_image)
         # convert grayscale to RGB
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
-                              lambda: input_image)
+        # input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
+        #                       lambda: input_image)
         # fly圖片歸一化0-1 浮點數據類型
         input_image = tf.image.convert_image_dtype(input_image, dtype=tf.float32)
         # fly設置圖片類型
-        input_image.set_shape([CROP_SIZE, CROP_SIZE, 3])
+        input_image.set_shape([CROP_SIZE, CROP_SIZE, 1])
         # fly增加圖片維度 axis=0 代表增加在前面加一維 -1在後面
         batch_input = tf.expand_dims(input_image, axis=0)
         # variable_scope变量有相同的命名
@@ -716,7 +757,7 @@ def main():
         # 這塊日後需要修改
         with tf.variable_scope("generator"):
             batch_output = deprocess(create_generator(preprocess(batch_input),preprocess(batch_input),
-                                                      preprocess(batch_input),3))
+                                                      preprocess(batch_input),1))
 
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
         if a.output_filetype == "png":

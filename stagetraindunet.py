@@ -82,7 +82,7 @@ parser.add_argument("--per_weight", type=float, default=50.0, help="weight on pe
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
 parser.add_argument("--discrim_m", type=float, default=0.25, help="margin on GAN term for distrim percernal loss")
 parser.add_argument("--dis_per_w", type=float, default=20.0, help="weight on GAN term for distrim percernal loss")#100
-parser.add_argument("--saveHide_freq", type=int, default=120000, help="保存隐藏层")
+parser.add_argument("--saveHide_freq", type=int, default=1600000, help="保存隐藏层")
 # 感知損失 for 鑑別器
 # --gan_weight:類型：float默認值：1.0說明：生成器梯度的GAN項權重。用途：設置GAN損失的權重。
 parser.add_argument("--cenSul_weight", type=float, default=50.0, help="weight on GAN term for central Sul loss")
@@ -865,7 +865,7 @@ def create_model(inputs, condition1, condition2, targets):
     with tf.name_scope("real_local_discriminator"):
         with tf.variable_scope("local_discriminator"):
             # 2x [batch, height, width, channels] => [batch, 30, 30, 1]
-            predict_local_real = create_local_discriminator(inputs, condition1, condition2, outputs)
+            predict_local_real = create_local_discriminator(inputs, condition1, condition2, targets)
 
     with tf.name_scope("fake_local_discriminator"):
         # Setting reuse=True avoids creating new variables and reuses the ones from the local  real discriminator.
@@ -924,7 +924,7 @@ def create_model(inputs, condition1, condition2, targets):
         hist_real = tf.histogram_fixed_width(predict_real[-1], [0.0, 255.0], 256)
 
         histogram_loss = tf.cond(
-            tf.greater_equal(tf.train.get_or_create_global_step(), 2000),
+            tf.greater_equal(tf.train.get_or_create_global_step(), 60000),
             lambda: tf.reduce_mean(
                 tf.divide(
                     tf.square(tf.cast(hist_fake, tf.float32) - tf.cast(hist_real, tf.float32)),
@@ -1058,7 +1058,7 @@ def main():
     # # # 训练的时候的参数(由于采用
     a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//final//"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISSTAAGEGAN//"
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DAISSTAAGEGAN60000//"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
@@ -1314,7 +1314,7 @@ def main():
     ))
 
     tf.summary.scalar("histogram_loss", tf.cond(
-        tf.greater_equal(tf.train.get_or_create_global_step(), 2000),
+        tf.greater_equal(tf.train.get_or_create_global_step(), 60000),
         lambda: model.histogram_loss,
         lambda: 0.0
     ))
@@ -1435,7 +1435,7 @@ def main():
                         fetches["gen_loss_CenSul"] = model.gen_loss_CenSul
 
 
-                    if step >= 2000:
+                    if step >= 60000:
                         fetches["histogram_loss"] = model.histogram_loss
 
 
@@ -1487,7 +1487,7 @@ def main():
                     else:
                         print("gen_loss_CenSul: N/A")
 
-                    if step >= 2000:
+                    if step >= 60000:
                         print("histogram_loss", results["histogram_loss"])
                     else:
                         print("histogram_loss: N/A")
