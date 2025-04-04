@@ -5,9 +5,9 @@ import cv2
 import argparse
 
 parser = argparse.ArgumentParser('create image pairs')
-parser.add_argument('--fold_A', dest='fold_A', help='input directory for image A', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=2/Downfill')
-parser.add_argument('--fold_B', dest='fold_B', help='input directory for image B', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=2/Prepfill/')
-parser.add_argument('--fold_AB', dest='fold_AB', help='output directory', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=2/downprep/')
+parser.add_argument('--fold_A', dest='fold_A', help='input directory for image A', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAIStestdata/depth/r=2/prepcom')
+parser.add_argument('--fold_B', dest='fold_B', help='input directory for image B', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAIStestdata/depth/r=2/up/')
+parser.add_argument('--fold_AB', dest='fold_AB', help='output directory', type=str, default='D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAIStestdata/depth/r=2/prepcomup/')
 parser.add_argument('--num_imgs', dest='num_imgs', help='number of images',type=int, default=1000)
 parser.add_argument('--use_AB', dest='use_AB', help='if true: (0001_A, 0001_B) to (0001_AB)',action='store_true')
 args = parser.parse_args()

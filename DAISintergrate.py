@@ -46,10 +46,10 @@ parser.add_argument("--progress_freq", type=int, default=50, help="display progr
 #--trace_freq:類型：int默認值：0說明：包括每個操作的執行時間、內存使用等。跟蹤會顯著降低執行速度，所以默認值為0（即不跟蹤）。
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
 #--display_freq:類型：int默認值：2000說明：每display_freq步寫當前訓練圖像。用途：設置圖像顯示的頻率。
-parser.add_argument("--display_freq", type=int, default=5000,
+parser.add_argument("--display_freq", type=int, default=10000,
                     help="write current training images every display_freq steps")
 # --save_freq:類型：int默認值：2000說明：每save_freq步保存模型（設為0則禁用）。用途：設置模型保存的頻率。
-parser.add_argument("--save_freq", type=int, default=5000, help="save model every save_freq steps, 0 to disable")
+parser.add_argument("--save_freq", type=int, default=10000, help="save model every save_freq steps, 0 to disable")
 #--aspect_ratio:類型：float默認值：1.0說明：輸出圖像的寬高比。用途：設置輸出圖像的寬高比。
 parser.add_argument("--aspect_ratio", type=float, default=1.0, help="aspect ratio of output images (width/height)")
 #--lab_colorization:類型：布爾說明：將輸入圖像分為亮度（A）和顏色（B）。用途：啟用或禁用LAB顏色分離。
@@ -1061,16 +1061,16 @@ def main():
     # # # 训练的时候的参数(由于采用
     a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
-    # # # # # # # 训练的时候的参数(由于采用
-    a.input_dir =  "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//depthfordifferentr//DAISdepth//r=2//final"
+    # # # # # # # # 训练的时候的参数(由于采用
+    a.input_dir =  "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final"
     a.mode = "train"
-    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//testre=2//"
-    a.max_epochs=400
+    a.output_dir = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//rebbr=2changeparameter//"
+    a.max_epochs=800
     a.which_direction = "BtoA"
 
-    # a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//DCPRr=0papernohistorgram//"
+    # a.checkpoint = "D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//model//obbr=2//"
     # a.mode = "export"
-    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DCPRr=0papernohistorgram//"
+    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//obbr=2//"
     # a.which_direction = "BtoA"
 
     # 测试的时候的参数
@@ -1126,77 +1126,96 @@ def main():
     # 模型测试
     # 將訓練好的生成器模型導出為獨立的 meta 文件，方便後續用於生成圖片而不依賴完整的訓練代碼。
     if a.mode == "export":
-        # 如果 lab_colorization 為 True，直接報錯，說明不支持該功能導出。
+    # 如果 lab_colorization 設為 True，則拋出異常，因為該功能不支援導出。
         if a.lab_colorization:
             raise Exception("export not supported for lab_colorization")
-        # 輸入占位符：input 是一個接收 Base64 格式的字符串數據的占位符。
-        # Base64 解碼：tf.decode_base64 將字符串解碼為圖像數據。
-        # PNG 解碼：tf.image.decode_png 解析數據為 PNG 圖像。
+
+        # 定義輸入占位符，用於接收 Base64 格式的字符串數據
         input = tf.placeholder(tf.string, shape=[1])
+
+        # 解析 Base64 字符串為原始影像數據
         input_data = tf.decode_base64(input[0])
+
+        # 解碼 PNG 影像數據
         input_image = tf.image.decode_png(input_data)
-        # 移除透明通道：如果圖像有 4 個通道（RGB + Alpha），則保留前三個通道（RGB）。
-        # 灰度轉 RGB：如果圖像只有 1 個通道（灰度），將其轉換為 RGB（每個通道值相同）。
-        # remove alpha channel if present
-        input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 4), lambda: input_image[:, :, :1], lambda: input_image)
-        # convert grayscale to RGB
-        # input_image = tf.cond(tf.equal(tf.shape(input_image)[2], 1), lambda: tf.image.grayscale_to_rgb(input_image),
-        #                       lambda: input_image)
-        # 歸一化：將圖像數據轉換為 float32，並將像素值歸一化到 [0, 1]。
-        # 設置形狀：確保輸入圖像為 [CROP_SIZE, CROP_SIZE, 3]，其中 3 表示 RGB。
-        # 增加 batch 維度：將圖像從 [height, width, channels] 擴展為 [1, height, width, channels]，以滿足生成器的輸入要求
+
+        # 如果影像有 4 個通道 (RGBA)，則移除 Alpha 通道 (僅保留 RGB)
+        input_image = tf.cond(
+            tf.equal(tf.shape(input_image)[2], 4),
+            lambda: input_image[:, :, :1],
+            lambda: input_image
+        )
+
+        # 轉換影像數據類型為 float32，並將像素值歸一化到 [0, 1]
         input_image = tf.image.convert_image_dtype(input_image, dtype=tf.float32)
-        # fly設置圖片類型
-        input_image.set_shape([CROP_SIZE, CROP_SIZE, 1])
-        # fly增加圖片維度 axis=0 代表增加在前面加一維 -1在後面
+
+        # 設定影像形狀：應為 [CROP_SIZE, 3 * CROP_SIZE, 1]
+        input_image.set_shape([CROP_SIZE, 3 * CROP_SIZE, 1])
+
+        # 增加批次維度 (batch dimension)，變為 [1, height, width, channels]
         batch_input = tf.expand_dims(input_image, axis=0)
-        # preprocess：對圖像進行預處理，使其符合生成器的輸入要求。
-        # create_generator：生成器模型，輸出圖像特徵。
-        # deprocess：將生成器的輸出轉換為標準圖像格式。
+
+        # 使用生成器處理影像
         with tf.variable_scope("generator"):
-            batch_output = deprocess(create_generator(preprocess(batch_input),preprocess(batch_input),
-                                                      preprocess(batch_input),1))
-        # 數據類型轉換：生成器的輸出圖像被轉換為 uint8（0-255 的整數值）。
-        # 圖像編碼：根據用戶選擇將圖像編碼為 PNG 或 JPEG。
-        # Base64 編碼：將編碼好的圖像轉換為 Base64 字符串，方便輸出。
+            batch_output = deprocess(
+                create_generator(
+                    preprocess(batch_input[:, :, :256, :]),  # 第一張
+                    preprocess(batch_input[:, :, 256:512, :]),  # 第二張 (條件1)
+                    preprocess(batch_input[:, :, 512:, :]),  # 第三張 (條件2)
+                    1
+                )
+            )
+
+        # 將生成的影像數據轉換為 uint8 (0-255)
         output_image = tf.image.convert_image_dtype(batch_output, dtype=tf.uint8)[0]
+
+        # 根據輸出格式選擇編碼方式 (PNG 或 JPEG)
         if a.output_filetype == "png":
             output_data = tf.image.encode_png(output_image)
         elif a.output_filetype == "jpeg":
             output_data = tf.image.encode_jpeg(output_image, quality=80)
         else:
             raise Exception("invalid filetype")
-        output = tf.convert_to_tensor([tf.encode_base64(output_data)])
-        # inputs：描述模型的輸入結構，包括鍵值對（例如圖像的 Base64 字符串）。
-        # outputs：描述模型的輸出結構，提供生成的 Base64 字符串。
 
+        # 轉換為 Base64 字符串格式，以便輸出
+        output = tf.convert_to_tensor([tf.encode_base64(output_data)])
+
+        # 定義 key 的占位符，與輸入數據一起作為模型的輸入
         key = tf.placeholder(tf.string, shape=[1])
         inputs = {
             "key": key.name,
             "input": input.name
         }
         tf.add_to_collection("inputs", json.dumps(inputs))
+
+        # 定義輸出的格式，將處理後的影像結果作為輸出
         outputs = {
             "key": tf.identity(key).name,
             "output": output.name,
         }
         tf.add_to_collection("outputs", json.dumps(outputs))
-        # 初始化參數：tf.global_variables_initializer() 初始化模型的變量。
-        # 加載權重：
-        # tf.train.latest_checkpoint(a.checkpoint) 獲取最近保存的權重文件。
-        # restore_saver.restore(sess, checkpoint) 加載權重到模型。
+
+        # 初始化模型變量
         init_op = tf.global_variables_initializer()
+
+        # 設定 Saver 物件以恢復與保存模型權重
         restore_saver = tf.train.Saver()
         export_saver = tf.train.Saver()
-        # export_meta_graph 保存 meta 文件（模型結構、計算圖）。
-        # export_saver.save 保存具體的權重數據。
+
         with tf.Session() as sess:
+            # 執行變量初始化
             sess.run(init_op)
+
             print("loading model from checkpoint")
+            # 載入最近的 checkpoint
             checkpoint = tf.train.latest_checkpoint(a.checkpoint)
             restore_saver.restore(sess, checkpoint)
+
             print("exporting model")
+            # 將模型的計算圖 (meta graph) 保存為 .meta 文件
             export_saver.export_meta_graph(filename=os.path.join(a.output_dir, "export.meta"))
+
+            # 保存模型的權重
             export_saver.save(sess, os.path.join(a.output_dir, "export"), write_meta_graph=False)
 
         return

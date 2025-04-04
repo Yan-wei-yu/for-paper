@@ -534,10 +534,10 @@ def append_index(filesets, step=False):
 
 
 def main():
-    a.input_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=1.5/downprep/"
+    a.input_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/r=2/downprep1/"
     a.mode = "train"
-    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/pixtopixr=1.5dcpr/"
-    a.max_epochs=400
+    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRnew/"
+    a.max_epochs=200
     a.which_direction = "BtoA"
 
     # a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/pixtopixr=2/"

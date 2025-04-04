@@ -659,15 +659,15 @@ def append_index(filesets, step=False):
 
 
 def main():
-    # a.input_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/r=2/downprep/"
+    # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISotherside/obb/90onlay/train/final/'
     # a.mode = "train"
-    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/pixtopixr=2/"
+    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/obb90onlay/"
     # a.max_epochs=400
     # a.which_direction = "BtoA"
     
-    a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/finalorginal-90onlay/"
+    a.checkpoint =  "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/obb-90onlay/"
     a.mode = "export"
-    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//finalorginal-90onlay//"
+    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//obb-90onlay//"
     a.which_direction = "BtoA"
     if a.seed is None:
         a.seed = random.randint(0, 2**31 - 1)
