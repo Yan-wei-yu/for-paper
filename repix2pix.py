@@ -659,16 +659,16 @@ def append_index(filesets, step=False):
 
 
 def main():
-    # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISotherside/obb/90onlay/train/final/'
-    # a.mode = "train"
-    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/obb90onlay/"
-    # a.max_epochs=400
-    # a.which_direction = "BtoA"
-    
-    a.checkpoint =  "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/obb-90onlay/"
-    a.mode = "export"
-    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//obb-90onlay//"
+    a.input_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DCPRotherside/obb/-90/testfinal"
+    a.mode = "train"
+    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/dcprgan-90obb/"
+    a.max_epochs=400
     a.which_direction = "BtoA"
+    
+    # a.checkpoint =  "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/dcprgan-90/"
+    # a.mode = "export"
+    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//dcprgan-90//"
+    # a.which_direction = "BtoA"
     if a.seed is None:
         a.seed = random.randint(0, 2**31 - 1)
 

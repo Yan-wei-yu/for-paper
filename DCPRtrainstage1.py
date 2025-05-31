@@ -54,7 +54,9 @@ parser.add_argument("--hist_weight", type=float, default=50.0, help="weight on G
 # parser.add_argument("--saveHide_freq", type=int, default=120000, help="保存隐藏层")
 # 感知損失 for 鑑別器
 # --gan_weight:類型：float默認值：1.0說明：生成器梯度的GAN項權重。用途：設置GAN損失的權重。
-# parser.add_argument("--cenSul_weight", type=float, default=50.0, help="weight on GAN term for central Sul loss")
+parser.add_argument("--cenSul_weight", type=float, default=50.0, help="weight on GAN term for central Sul loss")
+parser.add_argument("--over_occlusion_weight", type=float, default=5.0, help="weight for over-occlusion loss")
+parser.add_argument("--under_occlusion_weight", type=float, default=2.0, help="weight for under-occlusion loss")
 # --cenSul_weight:類型：float默認值：100.0說明：中央溝損失的權重。用途：設置中央溝損失的權重。
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
 a = parser.parse_args()
@@ -63,10 +65,12 @@ EPS = 1e-12
 CROP_SIZE = 256
 
 Examples = collections.namedtuple("Examples", "paths, inputs, condition1, condition2, targets, count, steps_per_epoch")
-Model = collections.namedtuple("Model",
-                               "outputs, predict_real, predict_fake, global_discrim_loss,discrim_loss_per, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss, gen_grads_and_vars, train")
+# Model = collections.namedtuple("Model",
+#                                "outputs, predict_real, predict_fake, global_discrim_loss,discrim_loss_per, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss, gen_grads_and_vars, train")
 # Model = collections.namedtuple("Model",
 #                                "outputs, predict_real, predict_fake, global_discrim_loss, discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1, gen_grads_and_vars, train")
+Model = collections.namedtuple("Model",
+                               "outputs, predict_real, predict_fake, global_discrim_loss,discrim_loss_per,discrim_grads_and_vars, gen_loss_GAN, gen_loss_L1,gen_per_loss,histogram_loss,gen_loss_collision, gen_grads_and_vars, train")
 def preprocess(image):
     with tf.name_scope("preprocess"):
         # [0, 1] => [-1, 1]
@@ -537,6 +541,28 @@ def create_model(inputs, condition1, condition2, targets):
         # predict_fake => 1
         # abs(targets - outputs) => 0
         gen_loss_GAN = tf.reduce_mean(-tf.log(predict_fake[-1] + EPS))
+        outputs_norm = (outputs + 1.) * 0.5
+        condition1_norm = (condition1 + 1.) * 0.5
+        targets_norm = (targets + 1.) * 0.5
+
+        # 計算差異
+        diff_gen_cond = outputs_norm - condition1_norm  # [batch, H, W, C]
+        diff_cond_tgt = condition1_norm - targets_norm  # [batch, H, W, C]
+
+        # 為正負偏差設置不同權重
+        positive_diff_gen = tf.nn.relu(diff_gen_cond)
+        negative_diff_gen = tf.nn.relu(-diff_gen_cond)
+        positive_diff_tgt = tf.nn.relu(diff_cond_tgt)
+        negative_diff_tgt = tf.nn.relu(-diff_cond_tgt)
+
+        # 計算加權損失
+        collision_loss = (a.over_occlusion_weight * tf.reduce_mean(positive_diff_gen) +
+                        a.under_occlusion_weight * tf.reduce_mean(negative_diff_gen))
+        target_collision_loss = (a.over_occlusion_weight * tf.reduce_mean(positive_diff_tgt) +
+                                a.under_occlusion_weight * tf.reduce_mean(negative_diff_tgt))
+
+        # 碰撞損失
+        gen_loss_collision = tf.abs(collision_loss - target_collision_loss)
         gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs))
         gen_per_loss=perceptual_Loss(predict_real,predict_fake)#3
         hist_fake = tf.histogram_fixed_width(predict_fake[-1],  [0.0, 255.0], 256)
@@ -547,11 +573,18 @@ def create_model(inputs, condition1, condition2, targets):
             tf.square(tf.cast(hist_fake, tf.float32) - tf.cast(hist_real, tf.float32)),
             tf.maximum(1.0, tf.cast(hist_real, tf.float32))  # 確保類型一致
         )
-        )
-        # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight
-        gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_per_loss * a.per_weight+histogram_loss * a.hist_weight
+    )
 
+        # 將上述多個損失以權重加權求和，平衡不同損失的影響。
+        # gen_loss = gen_loss_GAN * a.gan_weight + gen_loss_L1 * a.l1_weight+gen_loss_CenSul*a.cenSul_weight+gen_per_loss * a.per_weight+histogram_loss * a.hist_weight
+        # 結合所有損失，加權求和
+        gen_loss = (gen_loss_GAN * a.gan_weight +
+                    gen_loss_L1 * a.l1_weight +
+                    gen_per_loss * a.per_weight +
+                    histogram_loss * a.hist_weight +
+                    gen_loss_collision * a.collision_weight)
 
+    # 作用：使用 Adam 優化器更新與判別器相關的參數，讓其學習如何更好地區分真實與生成圖像。
     with tf.name_scope("discriminator_train"):
         discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
         discrim_optim = tf.train.AdamOptimizer(a.lr, a.beta1)
@@ -566,7 +599,7 @@ def create_model(inputs, condition1, condition2, targets):
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
-    update_losses = ema.apply([global_discrim_loss,discrim_loss_per, gen_loss_GAN, gen_per_loss, gen_loss_L1,histogram_loss])
+    update_losses = ema.apply([global_discrim_loss,discrim_loss_per, gen_loss_GAN, gen_per_loss, gen_loss_L1,histogram_loss,gen_loss_collision])
     # update_losses = ema.apply([global_discrim_loss, gen_loss_GAN, gen_loss_L1])
 
 
@@ -583,6 +616,7 @@ def create_model(inputs, condition1, condition2, targets):
         gen_loss_L1=ema.average(gen_loss_L1),
         gen_per_loss=ema.average(gen_per_loss),
         histogram_loss=ema.average(histogram_loss),
+        gen_loss_collision=ema.average(gen_loss_collision),
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
         train=tf.group(update_losses, incr_global_step, gen_train),
@@ -643,9 +677,9 @@ def main():
     # 训练的时候的参数(由于采用
 
     # 训练的时候的参数(由于采用
-    a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/obb/r=2/final'
+    a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/bb/r=2.5/final'
     a.mode = "train"
-    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/dcprredatar=2/"
+    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/dcprredatar=2.5/"
     a.max_epochs=400
     a.which_direction = "BtoA"
 
@@ -869,6 +903,8 @@ def main():
     with tf.name_scope("predict_fake_summary"):
         tf.summary.image("predict_fake", tf.image.convert_image_dtype(model.predict_fake, dtype=tf.uint8))
 
+    tf.summary.scalar("generator_loss_collision", model.gen_loss_collision)
+
     tf.summary.scalar("global_discriminator_loss", model.global_discrim_loss)
     tf.summary.scalar("discriminator_loss_per", model.discrim_loss_per)
     tf.summary.scalar("generator_loss_per", model.gen_per_loss)
@@ -946,6 +982,7 @@ def main():
                     fetches["gen_loss_L1"] = model.gen_loss_L1
                     fetches["gen_per_loss"] = model.gen_per_loss
                     fetches["histogram_loss"] = model.histogram_loss
+                    fetches["gen_loss_collision"] = model.gen_loss_collision  # 新增
 
 
 
@@ -984,7 +1021,11 @@ def main():
                     print("gen_loss_L1", results["gen_loss_L1"])
                     print("gen_per_loss", results["gen_per_loss"])
                     print("histogram_loss", results["histogram_loss"])
+                    print("gen_loss_collision", results["gen_loss_collision"])  # 新增
+                    
+                    
 
+                # 每隔 save_freq 步保存一次模型的檢查點。
                 if should(a.save_freq):
                     print("saving model")
                     saver.save(sess, os.path.join(a.output_dir, "model"), global_step=step)
