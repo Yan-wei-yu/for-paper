@@ -83,12 +83,12 @@ parser.add_argument("--dis_per_w", type=float, default=20.0, help="weight on GAN
 # 感知損失 for 鑑別器
 # --gan_weight:類型：float默認值：1.0說明：生成器梯度的GAN項權重。用途：設置GAN損失的權重。
 parser.add_argument("--cenSul_weight", type=float, default=50.0, help="weight on GAN term for central Sul loss")
-parser.add_argument("--over_occlusion_weight", type=float, default=5.0, help="weight for over-occlusion loss")
-parser.add_argument("--under_occlusion_weight", type=float, default=2.0, help="weight for under-occlusion loss")
+parser.add_argument("--over_occlusion_weight", type=float, default=10.0, help="weight for over-occlusion loss")
+parser.add_argument("--under_occlusion_weight", type=float, default=5.0, help="weight for under-occlusion loss")
 # --cenSul_weight:類型：float默認值：100.0說明：中央溝損失的權重。用途：設置中央溝損失的權重。
-parser.add_argument("--collision_weight", type=float, default=40.0, help="weight for collision loss")
+parser.add_argument("--collision_weight", type=float, default=100.0, help="weight for collision loss")
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
-parser.add_argument("--hist_weight", type=float, default=50.0, help="weight on GAN term for hist loss")
+parser.add_argument("--hist_weight", type=float, default=10.0, help="weight on GAN term for hist loss")
 # parser.add_argument("--hist_weight", type=float, default=50.0, help="weight on GAN term for hist loss")
 
 
@@ -924,7 +924,7 @@ def create_model(inputs, condition1, condition2, targets):
 
         # 計算差異
         diff_gen_cond = outputs_norm - condition1_norm  # [batch, H, W, C]
-        diff_cond_tgt = condition1_norm - targets_norm  # [batch, H, W, C]
+        diff_cond_tgt = targets_norm - condition1_norm  # [batch, H, W, C]
 
         # 為正負偏差設置不同權重
         positive_diff_gen = tf.nn.relu(diff_gen_cond)
@@ -1103,21 +1103,21 @@ def main():
     #         raise Exception("Tensorflow version 1 required")
 
     # # # # 训练的时候的参数(由于采用
-    a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
+    # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
-    # # # # # # # # # 训练的时候的参数(由于采用
-    # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
+    # # # # # # # # # # 训练的时候的参数(由于采用
+    # # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
     # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/bb/r=1/final'
-    a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
-    a.mode = "train"
-    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DAISdepthr=2parameter/"
-    a.max_epochs=400
-    a.which_direction = "BtoA"
-
-    # a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DAISdepthr=2andonecollision/"
-    # a.mode = "export"
-    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DAISdepthr=2andonecollision//"
+    # # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
+    # a.mode = "train"
+    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRdepthr=1parameter/"
+    # a.max_epochs=400
     # a.which_direction = "BtoA"
+
+    a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRdepth=1collisionandchangehistorgram/"
+    a.mode = "export"
+    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DCPRdepth=1collisionandchangehistorgramr//"
+    a.which_direction = "BtoA"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
