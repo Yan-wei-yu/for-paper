@@ -88,7 +88,7 @@ parser.add_argument("--under_occlusion_weight", type=float, default=5.0, help="w
 # --cenSul_weight:類型：float默認值：100.0說明：中央溝損失的權重。用途：設置中央溝損失的權重。
 parser.add_argument("--collision_weight", type=float, default=100.0, help="weight for collision loss")
 parser.add_argument("--output_filetype", default="png", choices=["png", "jpeg"])
-parser.add_argument("--hist_weight", type=float, default=10.0, help="weight on GAN term for hist loss")
+parser.add_argument("--hist_weight", type=float, default=50.0, help="weight on GAN term for hist loss")
 # parser.add_argument("--hist_weight", type=float, default=50.0, help="weight on GAN term for hist loss")
 
 
@@ -1103,21 +1103,21 @@ def main():
     #         raise Exception("Tensorflow version 1 required")
 
     # # # # 训练的时候的参数(由于采用
-    # a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
+    a.cktCentralSul = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/DAISgroove/"
 
     # # # # # # # # # # 训练的时候的参数(由于采用
     # # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
     # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DCPRdepth/bb/r=1/final'
-    # # a.input_dir = 'D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/depthfordifferentr/DAISdepth/bb/r=2/final'
-    # a.mode = "train"
-    # a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRdepthr=1parameter/"
-    # a.max_epochs=400
-    # a.which_direction = "BtoA"
-
-    a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRdepth=1collisionandchangehistorgram/"
-    a.mode = "export"
-    a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DCPRdepth=1collisionandchangehistorgramr//"
+    a.input_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/forjournal/inlayonlay/train/final/"
+    a.mode = "train"
+    a.output_dir = "D:/Users/user/Desktop/weiyundontdelete/GANdata/forjournal/inlayonlay/train/trainmodel/"
+    a.max_epochs=400
     a.which_direction = "BtoA"
+
+    # a.checkpoint = "D:/Users/user/Desktop/weiyundontdelete/GANdata/trainingdepth/DAISdepth/alldata/model/DCPRdepth=1collisionandchangehistorgram/"
+    # a.mode = "export"
+    # a.output_dir ="D://Users//user//Desktop//weiyundontdelete//GANdata//trainingdepth//DAISdepth//alldata//exportmodel//DCPRdepth=1collisionandchangehistorgramr//"
+    # a.which_direction = "BtoA"
 
     # 测试的时候的参数
     #a.input_dir = "D:/Tensorflow/DAIS/test"
